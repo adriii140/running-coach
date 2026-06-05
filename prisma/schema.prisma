@@ -1,0 +1,629 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// ─────────────────────────────────────────
+// USUARIOS
+// ─────────────────────────────────────────
+
+model User {
+  id                 String    @id @default(cuid())
+  email              String?   @unique
+  name               String?
+  stravaId           String?   @unique
+  stravaAccessToken  String?
+  stravaRefreshToken String?
+  stravaTokenExpiry  DateTime?
+  profileImageUrl    String?
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
+
+  profile            RunnerProfile?
+  injuries           InjuryHistory[]
+  routePreferences   RoutePreferences?
+  activities         Activity[]
+  goals              Goal[]
+  events             SportEvent[]
+  trainingPlans      TrainingPlan[]
+  conversations      AIConversation[]
+  settings           Settings?
+  availability       WeeklyAvailability[]
+  calendarEvents     CalendarEvent[]
+  brain              RunningBrain?
+  generatedRoutes    GeneratedRoute[]
+  predictions        Prediction[]
+
+  @@map("users")
+}
+
+// ─────────────────────────────────────────
+// PERFIL DEL CORREDOR
+// ─────────────────────────────────────────
+
+model RunnerProfile {
+  id              String    @id @default(cuid())
+  userId          String    @unique
+  heightCm        Float?
+  weightKg        Float?
+  birthDate       DateTime?
+  sex             String?
+  experienceYears Int?
+  knownMaxHR      Int?
+  restingHR       Int?
+  observations    String?
+  updatedAt       DateTime  @updatedAt
+
+  user            User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("runner_profiles")
+}
+
+// ─────────────────────────────────────────
+// HISTORIAL DE LESIONES
+// ─────────────────────────────────────────
+
+model InjuryHistory {
+  id        String         @id @default(cuid())
+  userId    String
+  name      String
+  startDate DateTime
+  endDate   DateTime?
+  status    InjuryStatus   @default(ACTIVE)
+  severity  InjurySeverity
+  bodyPart  String?
+  notes     String?
+  createdAt DateTime       @default(now())
+  updatedAt DateTime       @updatedAt
+
+  user      User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, startDate])
+  @@map("injury_history")
+}
+
+// ─────────────────────────────────────────
+// PREFERENCIAS DE RUTAS
+// ─────────────────────────────────────────
+
+model RoutePreferences {
+  id                  String   @id @default(cuid())
+  userId              String   @unique
+  avoidRoads          Boolean  @default(false)
+  preferTrails        Boolean  @default(false)
+  preferAsphalt       Boolean  @default(true)
+  avoidTrafficLights  Boolean  @default(false)
+  allowHills          Boolean  @default(true)
+  maxElevationGainM   Int?     @default(300)
+  maxOriginDistanceKm Float?   @default(1.0)
+  updatedAt           DateTime @updatedAt
+
+  user                User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("route_preferences")
+}
+
+// ─────────────────────────────────────────
+// ACTIVIDADES
+// ─────────────────────────────────────────
+
+model Activity {
+  id               String       @id @default(cuid())
+  userId           String
+  stravaId         String?      @unique
+  name             String
+  activityType     ActivityType @default(RUN)
+  startDate        DateTime
+  distance         Float?
+  movingTime       Int
+  elapsedTime      Int
+  totalElevation   Float?
+  averageSpeed     Float?
+  maxSpeed         Float?
+  averageHeartrate Float?
+  maxHeartrate     Float?
+  averageCadence   Float?
+  sufferScore      Int?
+  hasHeartrate     Boolean      @default(false)
+  startLat         Float?
+  startLng         Float?
+  mapPolyline      String?
+  perceived        Int?
+  notes            String?
+  weatherTemp      Float?
+  weatherCondition String?
+  aiAnalysis       String?
+  createdAt        DateTime     @default(now())
+  updatedAt        DateTime     @updatedAt
+
+  user             User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  streams          ActivityStream?
+  laps             Lap[]
+  strengthSets     StrengthSet[]
+
+  @@index([userId, startDate])
+  @@index([userId, activityType])
+  @@map("activities")
+}
+
+model ActivityStream {
+  id         String   @id @default(cuid())
+  activityId String   @unique
+  time       Int[]
+  distance   Float[]
+  heartrate  Int[]
+  altitude   Float[]
+  velocity   Float[]
+  cadence    Int[]
+  latlng     Json
+
+  activity   Activity @relation(fields: [activityId], references: [id], onDelete: Cascade)
+
+  @@map("activity_streams")
+}
+
+model Lap {
+  id               String   @id @default(cuid())
+  activityId       String
+  lapIndex         Int
+  distance         Float
+  movingTime       Int
+  elapsedTime      Int
+  averageSpeed     Float
+  maxSpeed         Float?
+  averageHeartrate Float?
+  maxHeartrate     Float?
+
+  activity         Activity @relation(fields: [activityId], references: [id], onDelete: Cascade)
+
+  @@map("laps")
+}
+
+// ─────────────────────────────────────────
+// ENTRENAMIENTOS DE FUERZA
+// ─────────────────────────────────────────
+
+model StrengthSet {
+  id           String   @id @default(cuid())
+  activityId   String
+  exerciseName String
+  muscleGroups String[]
+  setIndex     Int
+  reps         Int?
+  weightKg     Float?
+  durationSec  Int?
+  restSec      Int?
+  notes        String?
+
+  activity     Activity @relation(fields: [activityId], references: [id], onDelete: Cascade)
+
+  @@map("strength_sets")
+}
+
+// ─────────────────────────────────────────
+// RUNNING BRAIN
+// ─────────────────────────────────────────
+
+model RunningBrain {
+  id               String    @id @default(cuid())
+  userId           String    @unique
+  updatedAt        DateTime  @updatedAt
+
+  best1kSec        Float?
+  best3kSec        Float?
+  best5kSec        Float?
+  best10kSec       Float?
+  bestHalfSec      Float?
+  bestMarathonSec  Float?
+  best1kDate       DateTime?
+  best3kDate       DateTime?
+  best5kDate       DateTime?
+  best10kDate      DateTime?
+  bestHalfDate     DateTime?
+  bestMarathonDate DateTime?
+
+  paceRecoverySec  Float?
+  paceEasySec      Float?
+  paceAerobicSec   Float?
+  paceTempoSec     Float?
+  paceThresholdSec Float?
+  paceRaceSec      Float?
+
+  hrResting        Int?
+  hrAverage        Int?
+  hrMax            Int?
+  hrZone1Max       Int?
+  hrZone2Max       Int?
+  hrZone3Max       Int?
+  hrZone4Max       Int?
+  hrZone5Max       Int?
+
+  ctl              Float?
+  atl              Float?
+  tsb              Float?
+  weeklyLoadKm     Float?
+  monthlyLoadKm    Float?
+
+  strengthSessionsMonth Int?      @default(0)
+  lastStrengthDate      DateTime?
+
+  totalDistanceKm       Float?    @default(0)
+  totalActivities       Int?      @default(0)
+  totalElevationM       Float?    @default(0)
+  totalStrengthSessions Int?      @default(0)
+
+  vo2max           Float?
+
+  user             User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("running_brain")
+}
+
+// ─────────────────────────────────────────
+// OBJETIVOS
+// ─────────────────────────────────────────
+
+model Goal {
+  id            String     @id @default(cuid())
+  userId        String
+  name          String
+  type          GoalType
+  targetDate    DateTime
+  distanceKm    Float?
+  targetTimeSec Int?
+  priority      Int        @default(1)
+  status        GoalStatus @default(ACTIVE)
+  linkedEventId String?
+  notes         String?
+  createdAt     DateTime   @default(now())
+  updatedAt     DateTime   @updatedAt
+
+  user          User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  linkedEvent   SportEvent? @relation(fields: [linkedEventId], references: [id])
+  trainingPlans TrainingPlan[]
+  predictions   Prediction[]
+
+  @@index([userId, targetDate])
+  @@map("goals")
+}
+
+// ─────────────────────────────────────────
+// EVENTOS DEPORTIVOS
+// ─────────────────────────────────────────
+
+model SportEvent {
+  id            String         @id @default(cuid())
+  userId        String
+  name          String
+  eventType     SportEventType
+  date          DateTime
+  distanceKm    Float?
+  location      String?
+  city          String?
+  country       String?
+  lat           Float?
+  lng           Float?
+  url           String?
+  price         Float?
+  registered    Boolean        @default(false)
+  priority      EventPriority  @default(SECONDARY)
+  elevationGain Float?
+  notes         String?
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
+
+  user          User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  goals         Goal[]
+
+  @@index([userId, date])
+  @@map("sport_events")
+}
+
+// ─────────────────────────────────────────
+// DISPONIBILIDAD SEMANAL
+// ─────────────────────────────────────────
+
+model WeeklyAvailability {
+  id            String             @id @default(cuid())
+  userId        String
+  dayOfWeek     Int
+  isAvailable   Boolean            @default(true)
+  preferredType SessionType?
+  notes         String?
+  updatedAt     DateTime           @updatedAt
+
+  user          User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+  slots         AvailabilitySlot[]
+
+  @@unique([userId, dayOfWeek])
+  @@map("weekly_availability")
+}
+
+model AvailabilitySlot {
+  id              String             @id @default(cuid())
+  availabilityId  String
+  startTime       String
+  endTime         String
+  durationMinutes Int
+
+  availability    WeeklyAvailability @relation(fields: [availabilityId], references: [id], onDelete: Cascade)
+
+  @@map("availability_slots")
+}
+
+// ─────────────────────────────────────────
+// CALENDARIO PERSONAL
+// ─────────────────────────────────────────
+
+model CalendarEvent {
+  id             String           @id @default(cuid())
+  userId         String
+  title          String
+  date           DateTime
+  endDate        DateTime?
+  allDay         Boolean          @default(true)
+  impact         TrainingImpact
+  category       CalendarCategory
+  notes          String?
+  recurring      Boolean          @default(false)
+  recurrenceRule String?
+  createdAt      DateTime         @default(now())
+
+  user           User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, date])
+  @@map("calendar_events")
+}
+
+// ─────────────────────────────────────────
+// PLANES DE ENTRENAMIENTO
+// ─────────────────────────────────────────
+
+model TrainingPlan {
+  id          String         @id @default(cuid())
+  userId      String
+  goalId      String?
+  name        String
+  startDate   DateTime
+  endDate     DateTime
+  type        PlanType
+  status      PlanStatus     @default(ACTIVE)
+  aiGenerated Boolean        @default(true)
+  aiContext   Json?
+  notes       String?
+  createdAt   DateTime       @default(now())
+  updatedAt   DateTime       @updatedAt
+
+  user        User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  goal        Goal?          @relation(fields: [goalId], references: [id])
+  sessions    PlannedSession[]
+
+  @@map("training_plans")
+}
+
+model PlannedSession {
+  id            String       @id @default(cuid())
+  planId        String
+  date          DateTime
+  type          SessionType
+  activityType  ActivityType @default(RUN)
+  distanceKm    Float?
+  durationMin   Int?
+  targetPaceSec Float?
+  description   String?
+  notes         String?
+  completed     Boolean      @default(false)
+  skipped       Boolean      @default(false)
+  activityId    String?
+
+  plan          TrainingPlan @relation(fields: [planId], references: [id], onDelete: Cascade)
+
+  @@index([planId, date])
+  @@map("planned_sessions")
+}
+
+// ─────────────────────────────────────────
+// RUTAS GENERADAS
+// ─────────────────────────────────────────
+
+model GeneratedRoute {
+  id          String    @id @default(cuid())
+  userId      String
+  name        String
+  distanceKm  Float
+  durationMin Int
+  elevationM  Float
+  type        RouteType
+  startLat    Float
+  startLng    Float
+  geometry    Json
+  gpxData     String?
+  tcxData     String?
+  waypoints   Json?
+  surface     String?
+  difficulty  String?
+  notes       String?
+  createdAt   DateTime  @default(now())
+
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("generated_routes")
+}
+
+// ─────────────────────────────────────────
+// CONVERSACIONES IA
+// ─────────────────────────────────────────
+
+model AIConversation {
+  id        String   @id @default(cuid())
+  userId    String
+  messages  Json
+  context   Json?
+  provider  String?
+  model     String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("ai_conversations")
+}
+
+// ─────────────────────────────────────────
+// PREDICCIONES
+// ─────────────────────────────────────────
+
+model Prediction {
+  id            String   @id @default(cuid())
+  userId        String
+  goalId        String?
+  distanceKm    Float
+  predictedSec  Int
+  realisticSec  Int
+  ambitiousSec  Int
+  aggressiveSec Int
+  confidence    Float
+  basedOnData   Json
+  createdAt     DateTime @default(now())
+
+  user          User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  goal          Goal?    @relation(fields: [goalId], references: [id])
+
+  @@map("predictions")
+}
+
+// ─────────────────────────────────────────
+// CONFIGURACIÓN
+// ─────────────────────────────────────────
+
+model Settings {
+  id               String   @id @default(cuid())
+  userId           String   @unique
+  aiProvider       String   @default("openrouter")
+  aiModel          String   @default("deepseek/deepseek-r1-0528:free")
+  ollamaUrl        String?  @default("http://localhost:11434")
+  unitSystem       String   @default("metric")
+  timezone         String   @default("Europe/Madrid")
+  weekStartsOn     Int      @default(1)
+  homeLocationLat  Float?
+  homeLocationLng  Float?
+  homeLocationName String?
+  autoSync         Boolean  @default(true)
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  user             User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("settings")
+}
+
+// ─────────────────────────────────────────
+// ENUMS
+// ─────────────────────────────────────────
+
+enum ActivityType {
+  RUN
+  TRAIL_RUN
+  VIRTUAL_RUN
+  STRENGTH
+  CYCLING
+  SWIMMING
+  WALKING
+  OTHER
+}
+
+enum InjuryStatus {
+  ACTIVE
+  RECOVERED
+  CHRONIC
+}
+
+enum InjurySeverity {
+  MILD
+  MODERATE
+  SEVERE
+}
+
+enum GoalType {
+  RELAY
+  FIVE_K
+  TEN_K
+  HALF_MARATHON
+  MARATHON
+  ULTRA
+  CUSTOM
+}
+
+enum GoalStatus {
+  ACTIVE
+  COMPLETED
+  CANCELLED
+}
+
+enum SportEventType {
+  ROAD_RACE
+  TRAIL_RACE
+  RELAY
+  TRIATHLON
+  OBSTACLE
+  VIRTUAL
+  FUN_RUN
+  CUSTOM
+}
+
+enum EventPriority {
+  PRIMARY
+  SECONDARY
+  TERTIARY
+}
+
+enum TrainingImpact {
+  BLOCKS_TRAINING
+  REDUCES_TIME
+  INCREASES_STRESS
+  NEUTRAL
+  POSITIVE
+}
+
+enum CalendarCategory {
+  TRAVEL
+  WORK
+  FAMILY
+  HEALTH
+  SOCIAL
+  REST
+  OTHER
+}
+
+enum PlanType {
+  WEEKLY
+  MONTHLY
+  RACE_PREP
+}
+
+enum PlanStatus {
+  ACTIVE
+  COMPLETED
+  PAUSED
+}
+
+enum SessionType {
+  EASY
+  LONG
+  TEMPO
+  INTERVALS
+  RECOVERY
+  RACE
+  STRENGTH
+  CROSS_TRAINING
+  REST
+}
+
+enum RouteType {
+  CIRCULAR
+  OUT_AND_BACK
+  POINT_TO_POINT
+}

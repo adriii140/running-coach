@@ -1,36 +1,173 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Running Copilot AI
 
-## Getting Started
+Entrenador personal inteligente basado en tus datos reales de Strava.
 
-First, run the development server:
+## Fase 1 — Lo que incluye
+
+- Autenticación con Strava OAuth
+- Sincronización manual e incremental de actividades
+- Sincronización automática vía webhook de Strava
+- Running Brain: récords personales, zonas de ritmo, carga de entrenamiento (CTL/ATL/TSB), VO2max estimado
+- Dashboard con resumen semanal y actividades recientes
+- Soporte para actividades de running, trail, fuerza y otras
+
+---
+
+## Requisitos previos
+
+- Node.js 18+
+- Una cuenta de Supabase (free tier)
+- Una cuenta de Strava con una app registrada
+
+---
+
+## 1. Clonar e instalar
+
+```bash
+npm install
+```
+
+---
+
+## 2. Configurar variables de entorno
+
+```bash
+cp .env.local.example .env.local
+```
+
+Edita `.env.local` con los valores:
+
+### Supabase
+
+1. Crea un proyecto en [supabase.com](https://supabase.com)
+2. Ve a **Settings → Database**
+3. Copia las URLs de conexión:
+   - `DATABASE_URL`: Transaction pooler (puerto 6543) con `?pgbouncer=true&connection_limit=1`
+   - `DIRECT_URL`: Session pooler (puerto 5432)
+
+### Strava
+
+1. Ve a [strava.com/settings/api](https://www.strava.com/settings/api)
+2. Crea una aplicación
+3. En **Authorization Callback Domain** pon `localhost` (dev) o tu dominio (prod)
+4. Copia `Client ID` y `Client Secret`
+
+### AUTH_SECRET
+
+```bash
+openssl rand -base64 32
+```
+
+### IA (opcional en Fase 1, necesario en Fase 2)
+
+- **OpenRouter**: [openrouter.ai](https://openrouter.ai) — modelos gratuitos disponibles
+- **Groq**: [console.groq.com](https://console.groq.com) — tier gratuito generoso
+- **Ollama**: [ollama.ai](https://ollama.ai) para uso 100% local
+
+---
+
+## 3. Ejecutar migraciones
+
+```bash
+# Primera vez (crea las tablas en Supabase)
+npx prisma migrate deploy
+
+# O en desarrollo (crea la migración y aplica)
+npx prisma migrate dev --name init
+```
+
+---
+
+## 4. Iniciar en desarrollo
 
 ```bash
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Abre [http://localhost:3000](http://localhost:3000)
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+---
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+## 5. Webhook de Strava (solo producción)
 
-## Learn More
+El webhook permite sincronización automática al completar una actividad.
+En desarrollo usa la sincronización manual desde el dashboard.
 
-To learn more about Next.js, take a look at the following resources:
+En producción (Vercel):
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+```bash
+curl -X POST https://www.strava.com/api/v3/push_subscriptions \
+  -F client_id=TU_CLIENT_ID \
+  -F client_secret=TU_CLIENT_SECRET \
+  -F callback_url=https://TU_DOMINIO/api/strava/webhook \
+  -F verify_token=running-copilot-webhook-2024
+```
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+---
 
-## Deploy on Vercel
+## Estructura del proyecto
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+```
+src/
+├── app/
+│   ├── (auth)/login/          # Login con Strava
+│   ├── (dashboard)/           # Páginas autenticadas
+│   │   ├── page.tsx           # Dashboard
+│   │   ├── activities/        # Lista de actividades
+│   │   ├── brain/             # Running Brain
+│   │   └── settings/          # Estado de configuración
+│   └── api/
+│       ├── auth/[...nextauth] # Auth.js handler
+│       ├── strava/sync        # Sincronización manual
+│       ├── strava/webhook     # Webhook automático
+│       ├── brain/recalculate  # Recalcular métricas
+│       └── activities         # API REST actividades
+├── lib/
+│   ├── auth/config.ts         # NextAuth + Strava OAuth
+│   ├── db/prisma.ts           # Cliente Prisma singleton
+│   ├── strava/                # Cliente API, transformación, sync
+│   └── brain/calculator.ts   # Motor Running Brain
+├── components/
+│   ├── dashboard/             # WeeklySummary, BrainStats, RecentActivities
+│   └── shared/                # Sidebar, utilidades de formato
+├── stores/                    # Estado global Zustand
+└── types/                     # TypeScript types
+```
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+---
+
+## Scripts
+
+```bash
+npm run dev             # Desarrollo
+npm run build           # Build producción
+npm run start           # Servidor producción
+npx prisma studio       # Explorador visual BD
+npx prisma migrate dev  # Nueva migración
+```
+
+---
+
+## Stack
+
+| Capa | Tecnología |
+|------|-----------|
+| Frontend | Next.js 15, React, TypeScript, Tailwind CSS |
+| UI | Shadcn/ui |
+| Base de datos | PostgreSQL (Supabase free tier) |
+| ORM | Prisma |
+| Auth | Auth.js v5 (NextAuth) |
+| Estado | Zustand |
+| Gráficos | Recharts (Fase 2) |
+| Mapas | Leaflet + OpenStreetMap (Fase 2) |
+| IA | OpenRouter / Groq / Ollama (Fase 2) |
+
+---
+
+## Fase 2 (próximamente)
+
+- Coach IA (chat con contexto completo)
+- Generador de rutas con OpenRouteService + Leaflet
+- Planificador de entrenamiento
+- Predicciones de carrera
+- Calendario personal y disponibilidad semanal
