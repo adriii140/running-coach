@@ -1,0 +1,119 @@
+import { NextRequest } from "next/server";
+import { getSessionFromRequest } from "@/lib/auth/session";
+import { getAIProvider, type ChatMessage } from "@/lib/ai/client";
+import { buildCoachSystemPrompt } from "@/lib/ai/coach-prompt";
+import { prisma } from "@/lib/db/prisma";
+
+export const dynamic = "force-dynamic";
+
+export async function POST(req: NextRequest) {
+  const session = await getSessionFromRequest(req);
+  if (!session) {
+    return new Response(JSON.stringify({ error: "Unauthorized" }), { status: 401 });
+  }
+
+  let messages: ChatMessage[];
+  try {
+    const body = await req.json();
+    messages = body.messages;
+    if (!Array.isArray(messages) || messages.length === 0) {
+      throw new Error("Invalid messages");
+    }
+  } catch {
+    return new Response(JSON.stringify({ error: "Bad request" }), { status: 400 });
+  }
+
+  // Cargar contexto del usuario
+  const [brain, recentActivities] = await Promise.all([
+    prisma.runningBrain.findUnique({ where: { userId: session.userId } }),
+    prisma.activity.findMany({
+      where: { userId: session.userId },
+      orderBy: { startDate: "desc" },
+      take: 20,
+      select: {
+        name: true,
+        activityType: true,
+        startDate: true,
+        distance: true,
+        movingTime: true,
+        totalElevation: true,
+        averageHeartrate: true,
+      },
+    }),
+  ]);
+
+  const systemPrompt = buildCoachSystemPrompt({
+    name: session.name,
+    brain,
+    recentActivities,
+  });
+
+  const fullMessages: ChatMessage[] = [
+    { role: "system", content: systemPrompt },
+    ...messages,
+  ];
+
+  const provider = getAIProvider();
+
+  try {
+    const textStream = await provider.stream(fullMessages);
+
+    // Convertir ReadableStream<string> → ReadableStream<Uint8Array> para la respuesta HTTP
+    const encoder = new TextEncoder();
+    const responseStream = new ReadableStream<Uint8Array>({
+      async start(controller) {
+        const reader = textStream.getReader();
+        let fullText = "";
+        try {
+          while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            fullText += value;
+            controller.enqueue(encoder.encode(value));
+          }
+        } finally {
+          reader.releaseLock();
+          controller.close();
+          // Guardar conversación en DB en background
+          saveConversation(session.userId, messages, fullText, provider.name).catch(
+            (e) => console.error("Error saving conversation:", e)
+          );
+        }
+      },
+    });
+
+    return new Response(responseStream, {
+      headers: {
+        "Content-Type": "text/plain; charset=utf-8",
+        "X-Content-Type-Options": "nosniff",
+        "Cache-Control": "no-cache",
+      },
+    });
+  } catch (err) {
+    console.error("AI stream error:", err);
+    return new Response(
+      JSON.stringify({ error: err instanceof Error ? err.message : "AI error" }),
+      { status: 500 }
+    );
+  }
+}
+
+async function saveConversation(
+  userId: string,
+  userMessages: ChatMessage[],
+  assistantReply: string,
+  provider: string
+) {
+  const allMessages = [
+    ...userMessages,
+    { role: "assistant" as const, content: assistantReply },
+  ];
+  await prisma.aIConversation.create({
+    data: {
+      userId,
+      messages: allMessages as never,
+      provider,
+      model: "llama-3.3-70b-versatile",
+    },
+  });
+}
