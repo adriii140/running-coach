@@ -1,8 +1,5 @@
 import type { NextAuthConfig } from "next-auth";
-import { PrismaAdapter } from "@auth/prisma-adapter";
-import { prisma } from "@/lib/db/prisma";
 
-// Provider OAuth personalizado para Strava
 const StravaProvider = {
   id: "strava",
   name: "Strava",
@@ -14,7 +11,21 @@ const StravaProvider = {
       approval_prompt: "auto",
     },
   },
-  token: "https://www.strava.com/oauth/token",
+  // Strava incluye el objeto "athlete" en la respuesta del token,
+  // lo que no cumple el estándar OAuth 2.0 y openid-client lo rechaza.
+  // conform() normaliza la respuesta antes de que la librería la procese.
+  token: {
+    url: "https://www.strava.com/oauth/token",
+    conform: async (response: Response) => {
+      const data = await response.json() as Record<string, unknown>;
+      // Eliminar el campo no-estándar "athlete" de la respuesta
+      const { athlete: _athlete, ...tokenData } = data;
+      return new Response(JSON.stringify(tokenData), {
+        status: response.status,
+        headers: { "Content-Type": "application/json" },
+      });
+    },
+  },
   userinfo: "https://www.strava.com/api/v3/athlete",
   clientId: process.env.STRAVA_CLIENT_ID,
   clientSecret: process.env.STRAVA_CLIENT_SECRET,
@@ -30,13 +41,15 @@ const StravaProvider = {
       name: `${profile.firstname} ${profile.lastname}`.trim(),
       email: profile.email ?? null,
       image: profile.profile,
-      stravaId: String(profile.id),
     };
   },
 };
 
+const isDatabaseConfigured =
+  !!process.env.DATABASE_URL &&
+  !process.env.DATABASE_URL.includes("placeholder");
+
 export const authConfig: NextAuthConfig = {
-  adapter: PrismaAdapter(prisma) as NextAuthConfig["adapter"],
   providers: [StravaProvider],
   session: { strategy: "jwt" },
   callbacks: {
@@ -49,7 +62,6 @@ export const authConfig: NextAuthConfig = {
           profile: string;
         };
 
-        // Guardar tokens de Strava en el JWT
         token.stravaId = String(p.id);
         token.stravaAccessToken = account.access_token;
         token.stravaRefreshToken = account.refresh_token;
@@ -57,34 +69,42 @@ export const authConfig: NextAuthConfig = {
           ? new Date(account.expires_at * 1000)
           : null;
 
-        // Sincronizar usuario en BD con datos de Strava
-        await prisma.user.upsert({
-          where: { stravaId: String(p.id) },
-          create: {
-            stravaId: String(p.id),
-            name: `${p.firstname} ${p.lastname}`.trim(),
-            profileImageUrl: p.profile,
-            stravaAccessToken: account.access_token ?? null,
-            stravaRefreshToken: (account.refresh_token as string) ?? null,
-            stravaTokenExpiry: account.expires_at
-              ? new Date(account.expires_at * 1000)
-              : null,
-          },
-          update: {
-            stravaAccessToken: account.access_token ?? null,
-            stravaRefreshToken: (account.refresh_token as string) ?? null,
-            stravaTokenExpiry: account.expires_at
-              ? new Date(account.expires_at * 1000)
-              : null,
-          },
-        });
-
-        // Obtener el id de nuestra BD
-        const user = await prisma.user.findUnique({
-          where: { stravaId: String(p.id) },
-          select: { id: true },
-        });
-        token.userId = user?.id;
+        if (isDatabaseConfigured) {
+          try {
+            // eslint-disable-next-line @typescript-eslint/no-require-imports
+            const { prisma } = require("@/lib/db/prisma");
+            await prisma.user.upsert({
+              where: { stravaId: String(p.id) },
+              create: {
+                stravaId: String(p.id),
+                name: `${p.firstname} ${p.lastname}`.trim(),
+                profileImageUrl: p.profile,
+                stravaAccessToken: account.access_token ?? null,
+                stravaRefreshToken: (account.refresh_token as string) ?? null,
+                stravaTokenExpiry: account.expires_at
+                  ? new Date(account.expires_at * 1000)
+                  : null,
+              },
+              update: {
+                stravaAccessToken: account.access_token ?? null,
+                stravaRefreshToken: (account.refresh_token as string) ?? null,
+                stravaTokenExpiry: account.expires_at
+                  ? new Date(account.expires_at * 1000)
+                  : null,
+              },
+            });
+            const user = await prisma.user.findUnique({
+              where: { stravaId: String(p.id) },
+              select: { id: true },
+            });
+            token.userId = user?.id;
+          } catch (err) {
+            console.error("DB sync error (non-fatal):", err);
+            token.userId = `strava_${p.id}`;
+          }
+        } else {
+          token.userId = `strava_${p.id}`;
+        }
       }
       return token;
     },
