@@ -1,4 +1,3 @@
-import NextAuth from "next-auth";
-import { authConfig } from "@/lib/auth/config";
-
-export const { handlers, auth, signIn, signOut } = NextAuth(authConfig);
+// Este archivo ya no usa next-auth.
+// La autenticación se gestiona en src/lib/auth/session.ts con jose.
+export {};

@@ -1,29 +1,27 @@
-import { auth } from "./auth";
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
+import { getSessionFromRequest } from "@/lib/auth/session";
 
-export default auth((req) => {
-  const isLoggedIn = !!req.auth;
-  const isLoginPage = req.nextUrl.pathname === "/login";
-  const isApiAuth = req.nextUrl.pathname.startsWith("/api/auth");
-  const isWebhook = req.nextUrl.pathname.startsWith("/api/strava/webhook");
+export async function middleware(req: NextRequest) {
+  const { pathname } = req.nextUrl;
 
-  // Webhook y rutas de auth son públicas
-  if (isApiAuth || isWebhook) {
-    return NextResponse.next();
-  }
+  // Rutas públicas que nunca requieren auth
+  const isPublic =
+    pathname === "/login" ||
+    pathname.startsWith("/api/auth/") ||
+    pathname.startsWith("/_next/") ||
+    pathname.startsWith("/icons/") ||
+    pathname === "/favicon.ico";
 
-  // Redirigir a login si no hay sesión
-  if (!isLoggedIn && !isLoginPage) {
+  if (isPublic) return NextResponse.next();
+
+  const session = await getSessionFromRequest(req);
+
+  if (!session) {
     return NextResponse.redirect(new URL("/login", req.url));
   }
 
-  // Si ya está logueado y va al login, redirigir al dashboard
-  if (isLoggedIn && isLoginPage) {
-    return NextResponse.redirect(new URL("/", req.url));
-  }
-
   return NextResponse.next();
-});
+}
 
 export const config = {
   matcher: ["/((?!_next/static|_next/image|favicon.ico|icons/).*)"],

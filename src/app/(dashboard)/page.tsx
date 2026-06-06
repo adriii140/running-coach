@@ -1,5 +1,5 @@
-import { auth } from "@/../auth";
-import { prisma } from "@/lib/db/prisma";
+import { redirect } from "next/navigation";
+import { getSession } from "@/lib/auth/session";
 import { WeeklySummary } from "@/components/dashboard/WeeklySummary";
 import { BrainStats } from "@/components/dashboard/BrainStats";
 import { RecentActivities } from "@/components/dashboard/RecentActivities";
@@ -7,75 +7,82 @@ import { SyncButton } from "@/components/dashboard/SyncButton";
 import { startOfWeek } from "date-fns";
 
 export default async function DashboardPage() {
-  const session = await auth();
-  if (!session?.user?.id) return null;
+  const session = await getSession();
+  if (!session) redirect("/login");
 
-  const userId = session.user.id;
+  const isDatabaseConfigured =
+    !!process.env.DATABASE_URL &&
+    !process.env.DATABASE_URL.includes("placeholder");
 
+  // Sin BD: mostrar dashboard vacío con mensaje
+  if (!isDatabaseConfigured) {
+    return (
+      <div className="space-y-6">
+        <div className="flex items-start justify-between">
+          <div>
+            <h1 className="text-2xl font-bold">
+              Hola, {session.name.split(" ")[0]} 👋
+            </h1>
+            <p className="text-sm text-muted-foreground mt-1">
+              Conectado con Strava correctamente
+            </p>
+          </div>
+        </div>
+        <div className="rounded-xl border border-yellow-500/30 bg-yellow-500/10 p-4">
+          <p className="text-sm font-medium text-yellow-600 dark:text-yellow-400">
+            Base de datos no configurada
+          </p>
+          <p className="text-sm text-muted-foreground mt-1">
+            Configura <code className="rounded bg-muted px-1">DATABASE_URL</code> en{" "}
+            <code className="rounded bg-muted px-1">.env.local</code> con tu
+            URL de Supabase para activar la sincronización de actividades.
+          </p>
+        </div>
+      </div>
+    );
+  }
+
+  const { prisma } = await import("@/lib/db/prisma");
+  const userId = session.userId;
   const weekStart = startOfWeek(new Date(), { weekStartsOn: 1 });
 
   const [weeklyActivities, recentActivities, brain] = await Promise.all([
-    // Actividades de la semana actual
     prisma.activity.findMany({
-      where: {
-        userId,
-        startDate: { gte: weekStart },
-      },
-      select: {
-        distance: true,
-        movingTime: true,
-        totalElevation: true,
-        activityType: true,
-      },
+      where: { userId, startDate: { gte: weekStart } },
+      select: { distance: true, movingTime: true, totalElevation: true, activityType: true },
     }),
-
-    // Últimas 10 actividades
     prisma.activity.findMany({
       where: { userId },
       orderBy: { startDate: "desc" },
       take: 10,
       select: {
-        id: true,
-        name: true,
-        activityType: true,
-        startDate: true,
-        distance: true,
-        movingTime: true,
-        totalElevation: true,
-        averageSpeed: true,
-        averageHeartrate: true,
+        id: true, name: true, activityType: true, startDate: true,
+        distance: true, movingTime: true, totalElevation: true,
+        averageSpeed: true, averageHeartrate: true,
       },
     }),
-
-    // Running Brain
     prisma.runningBrain.findUnique({ where: { userId } }),
   ]);
 
-  const firstName = session.user.name?.split(" ")[0] ?? "Corredor";
   const hour = new Date().getHours();
-  const greeting =
-    hour < 12 ? "Buenos días" : hour < 20 ? "Buenas tardes" : "Buenas noches";
+  const greeting = hour < 12 ? "Buenos días" : hour < 20 ? "Buenas tardes" : "Buenas noches";
 
   return (
     <div className="space-y-6">
-      {/* Cabecera */}
       <div className="flex items-start justify-between">
         <div>
           <h1 className="text-2xl font-bold">
-            {greeting}, {firstName} 👋
+            {greeting}, {session.name.split(" ")[0]} 👋
           </h1>
           <p className="text-sm text-muted-foreground mt-1">
             {new Date().toLocaleDateString("es-ES", {
-              weekday: "long",
-              day: "numeric",
-              month: "long",
+              weekday: "long", day: "numeric", month: "long",
             })}
           </p>
         </div>
         <SyncButton />
       </div>
 
-      {/* Resumen semanal */}
       <section>
         <h2 className="text-sm font-medium text-muted-foreground mb-3 uppercase tracking-wide">
           Esta semana
@@ -83,7 +90,6 @@ export default async function DashboardPage() {
         <WeeklySummary activities={weeklyActivities} />
       </section>
 
-      {/* Running Brain */}
       <section>
         <h2 className="text-sm font-medium text-muted-foreground mb-3 uppercase tracking-wide">
           Running Brain
@@ -91,7 +97,6 @@ export default async function DashboardPage() {
         <BrainStats brain={brain} />
       </section>
 
-      {/* Actividades recientes */}
       <section>
         <h2 className="text-sm font-medium text-muted-foreground mb-3 uppercase tracking-wide">
           Actividades recientes

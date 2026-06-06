@@ -12,10 +12,8 @@ import {
   LogOut,
   Dumbbell,
 } from "lucide-react";
-import { signOut } from "next-auth/react";
 import { cn } from "@/lib/utils";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
-import { Button } from "@/components/ui/button";
 
 const navItems = [
   { href: "/", label: "Dashboard", icon: LayoutDashboard },
@@ -28,10 +26,7 @@ const navItems = [
 ];
 
 interface SidebarProps {
-  user: {
-    name?: string | null;
-    image?: string | null;
-  };
+  user: { name?: string | null; image?: string | null };
 }
 
 export function Sidebar({ user }: SidebarProps) {
@@ -39,7 +34,6 @@ export function Sidebar({ user }: SidebarProps) {
 
   return (
     <aside className="flex h-screen w-64 flex-col border-r border-border/50 bg-card">
-      {/* Logo */}
       <div className="flex items-center gap-2 px-6 py-5 border-b border-border/50">
         <div className="h-8 w-8 rounded-lg bg-primary flex items-center justify-center">
           <Activity className="h-4 w-4 text-primary-foreground" />
@@ -50,15 +44,11 @@ export function Sidebar({ user }: SidebarProps) {
         </div>
       </div>
 
-      {/* Nav */}
       <nav className="flex-1 overflow-y-auto px-3 py-4">
         <ul className="space-y-1">
           {navItems.map((item) => {
             const isActive =
-              item.href === "/"
-                ? pathname === "/"
-                : pathname.startsWith(item.href);
-
+              item.href === "/" ? pathname === "/" : pathname.startsWith(item.href);
             return (
               <li key={item.href}>
                 <Link
@@ -79,7 +69,6 @@ export function Sidebar({ user }: SidebarProps) {
         </ul>
       </nav>
 
-      {/* User */}
       <div className="border-t border-border/50 p-3">
         <div className="flex items-center gap-3 rounded-lg p-2">
           <Avatar className="h-8 w-8">
@@ -91,15 +80,13 @@ export function Sidebar({ user }: SidebarProps) {
           <div className="flex-1 min-w-0">
             <p className="text-sm font-medium truncate">{user.name ?? "Usuario"}</p>
           </div>
-          <Button
-            variant="ghost"
-            size="icon"
-            className="h-8 w-8 shrink-0"
-            onClick={() => signOut({ callbackUrl: "/login" })}
+          <a
+            href="/api/auth/logout"
+            className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
             title="Cerrar sesión"
           >
             <LogOut className="h-4 w-4" />
-          </Button>
+          </a>
         </div>
       </div>
     </aside>
