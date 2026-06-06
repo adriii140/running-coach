@@ -1,7 +1,7 @@
 import { redirect } from "next/navigation";
 import { getSession } from "@/lib/auth/session";
-import { RecentActivities } from "@/components/dashboard/RecentActivities";
 import { SyncButton } from "@/components/dashboard/SyncButton";
+import { ActivitiesWithMap } from "@/components/activities/ActivitiesWithMap";
 
 export default async function ActivitiesPage() {
   const session = await getSession();
@@ -25,13 +25,29 @@ export default async function ActivitiesPage() {
   const activities = await prisma.activity.findMany({
     where: { userId: session.userId },
     orderBy: { startDate: "desc" },
-    take: 50,
     select: {
-      id: true, name: true, activityType: true, startDate: true,
-      distance: true, movingTime: true, totalElevation: true,
-      averageSpeed: true, averageHeartrate: true,
+      id: true,
+      name: true,
+      activityType: true,
+      startDate: true,
+      distance: true,
+      movingTime: true,
+      totalElevation: true,
+      averageSpeed: true,
+      averageHeartrate: true,
+      mapPolyline: true,
     },
   });
+
+  const serialized = activities.map((a) => ({
+    ...a,
+    startDate: a.startDate.toISOString(),
+    distance: a.distance ? Number(a.distance) : null,
+    movingTime: a.movingTime ?? null,
+    totalElevation: a.totalElevation ? Number(a.totalElevation) : null,
+    averageSpeed: a.averageSpeed ? Number(a.averageSpeed) : null,
+    averageHeartrate: a.averageHeartrate ? Number(a.averageHeartrate) : null,
+  }));
 
   return (
     <div className="space-y-6">
@@ -39,12 +55,12 @@ export default async function ActivitiesPage() {
         <div>
           <h1 className="text-2xl font-bold">Actividades</h1>
           <p className="text-sm text-muted-foreground mt-1">
-            {activities.length} actividades importadas
+            {activities.length} actividades · Haz clic en una para ver el mapa
           </p>
         </div>
         <SyncButton />
       </div>
-      <RecentActivities activities={activities as never} />
+      <ActivitiesWithMap activities={serialized} />
     </div>
   );
 }
