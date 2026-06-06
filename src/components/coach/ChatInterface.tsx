@@ -1,11 +1,18 @@
 "use client";
 
 import { useState, useRef, useEffect, useCallback } from "react";
-import { Send, Bot, User, Loader2, RotateCcw } from "lucide-react";
+import { Send, Bot, User, Loader2, RotateCcw, ChevronDown } from "lucide-react";
 
 interface Message {
   role: "user" | "assistant";
   content: string;
+}
+
+interface ModelOption {
+  id: string;
+  label: string;
+  provider: string;
+  description: string;
 }
 
 const SUGGESTED_QUESTIONS = [
@@ -21,9 +28,24 @@ export function ChatInterface() {
   const [input, setInput] = useState("");
   const [isStreaming, setIsStreaming] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [models, setModels] = useState<ModelOption[]>([]);
+  const [selectedModel, setSelectedModel] = useState<string>("");
+  const [showModelPicker, setShowModelPicker] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const abortRef = useRef<AbortController | null>(null);
+
+  useEffect(() => {
+    fetch("/api/coach/models")
+      .then((r) => r.json())
+      .then((data) => {
+        if (data.models?.length) {
+          setModels(data.models);
+          setSelectedModel(data.defaultModelId);
+        }
+      })
+      .catch(() => {});
+  }, []);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -52,7 +74,7 @@ export function ChatInterface() {
         const res = await fetch("/api/coach/chat", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ messages: newMessages }),
+          body: JSON.stringify({ messages: newMessages, modelId: selectedModel }),
           signal: abortRef.current.signal,
         });
 
@@ -112,6 +134,8 @@ export function ChatInterface() {
     setIsStreaming(false);
   };
 
+  const currentModel = models.find((m) => m.id === selectedModel);
+
   return (
     <div className="flex flex-col h-[calc(100vh-10rem)] max-w-3xl mx-auto">
       {/* Mensajes */}
@@ -156,17 +180,44 @@ export function ChatInterface() {
 
       {/* Input */}
       <div className="border-t border-border/50 pt-4">
-        {messages.length > 0 && (
-          <div className="flex justify-end mb-2">
+        <div className="flex items-center justify-between mb-2">
+          {/* Selector de modelo */}
+          {models.length > 0 && (
+            <div className="relative">
+              <button
+                onClick={() => setShowModelPicker((v) => !v)}
+                className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors bg-muted/40 rounded-lg px-2.5 py-1.5 border border-border/40"
+              >
+                <Bot className="h-3 w-3" />
+                <span>{currentModel?.label ?? "Modelo"}</span>
+                <ChevronDown className="h-3 w-3" />
+              </button>
+              {showModelPicker && (
+                <div className="absolute bottom-full mb-2 left-0 w-72 bg-background border border-border rounded-xl shadow-xl overflow-hidden z-10">
+                  {models.map((m) => (
+                    <button
+                      key={m.id}
+                      onClick={() => { setSelectedModel(m.id); setShowModelPicker(false); }}
+                      className={`w-full text-left px-4 py-2.5 hover:bg-muted/60 transition-colors border-b border-border/30 last:border-0 ${m.id === selectedModel ? "bg-primary/10" : ""}`}
+                    >
+                      <div className="text-sm font-medium">{m.label}</div>
+                      <div className="text-xs text-muted-foreground mt-0.5">{m.description}</div>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+          {messages.length > 0 && (
             <button
               onClick={reset}
-              className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors"
+              className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors ml-auto"
             >
               <RotateCcw className="h-3 w-3" />
               Nueva conversación
             </button>
-          </div>
-        )}
+          )}
+        </div>
         <div className="relative flex items-end gap-2 bg-muted/30 border border-border/60 rounded-xl px-4 py-3 focus-within:border-primary/50 transition-colors">
           <textarea
             ref={textareaRef}

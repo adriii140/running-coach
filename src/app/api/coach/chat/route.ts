@@ -1,6 +1,6 @@
 import { NextRequest } from "next/server";
 import { getSessionFromRequest } from "@/lib/auth/session";
-import { getAIProvider, type ChatMessage } from "@/lib/ai/client";
+import { streamFromModel, getDefaultModelId, type ChatMessage } from "@/lib/ai/client";
 import { buildCoachSystemPrompt } from "@/lib/ai/coach-prompt";
 import { prisma } from "@/lib/db/prisma";
 
@@ -8,22 +8,19 @@ export const dynamic = "force-dynamic";
 
 export async function POST(req: NextRequest) {
   const session = await getSessionFromRequest(req);
-  if (!session) {
-    return new Response(JSON.stringify({ error: "Unauthorized" }), { status: 401 });
-  }
+  if (!session) return new Response(JSON.stringify({ error: "Unauthorized" }), { status: 401 });
 
   let messages: ChatMessage[];
+  let modelId: string;
   try {
     const body = await req.json();
     messages = body.messages;
-    if (!Array.isArray(messages) || messages.length === 0) {
-      throw new Error("Invalid messages");
-    }
+    modelId = body.modelId ?? getDefaultModelId();
+    if (!Array.isArray(messages) || messages.length === 0) throw new Error("Invalid messages");
   } catch {
     return new Response(JSON.stringify({ error: "Bad request" }), { status: 400 });
   }
 
-  // Cargar contexto del usuario
   const [brain, recentActivities] = await Promise.all([
     prisma.runningBrain.findUnique({ where: { userId: session.userId } }),
     prisma.activity.findMany({
@@ -31,38 +28,22 @@ export async function POST(req: NextRequest) {
       orderBy: { startDate: "desc" },
       take: 20,
       select: {
-        name: true,
-        activityType: true,
-        startDate: true,
-        distance: true,
-        movingTime: true,
-        totalElevation: true,
-        averageHeartrate: true,
+        name: true, activityType: true, startDate: true,
+        distance: true, movingTime: true, totalElevation: true, averageHeartrate: true,
       },
     }),
   ]);
 
-  const systemPrompt = buildCoachSystemPrompt({
-    name: session.name,
-    brain,
-    recentActivities,
-  });
-
-  const fullMessages: ChatMessage[] = [
-    { role: "system", content: systemPrompt },
-    ...messages,
-  ];
-
-  const provider = getAIProvider();
+  const systemPrompt = buildCoachSystemPrompt({ name: session.name, brain, recentActivities });
+  const fullMessages: ChatMessage[] = [{ role: "system", content: systemPrompt }, ...messages];
 
   try {
-    const textStream = await provider.stream(fullMessages);
+    const { stream, modelUsed, provider } = await streamFromModel(modelId, fullMessages);
 
-    // Convertir ReadableStream<string> → ReadableStream<Uint8Array> para la respuesta HTTP
     const encoder = new TextEncoder();
     const responseStream = new ReadableStream<Uint8Array>({
       async start(controller) {
-        const reader = textStream.getReader();
+        const reader = stream.getReader();
         let fullText = "";
         try {
           while (true) {
@@ -74,8 +55,7 @@ export async function POST(req: NextRequest) {
         } finally {
           reader.releaseLock();
           controller.close();
-          // Guardar conversación en DB en background
-          saveConversation(session.userId, messages, fullText, provider.name).catch(
+          saveConversation(session.userId, messages, fullText, provider, modelUsed).catch(
             (e) => console.error("Error saving conversation:", e)
           );
         }
@@ -99,21 +79,15 @@ export async function POST(req: NextRequest) {
 }
 
 async function saveConversation(
-  userId: string,
-  userMessages: ChatMessage[],
-  assistantReply: string,
-  provider: string
+  userId: string, userMessages: ChatMessage[], assistantReply: string,
+  provider: string, model: string
 ) {
-  const allMessages = [
-    ...userMessages,
-    { role: "assistant" as const, content: assistantReply },
-  ];
   await prisma.aIConversation.create({
     data: {
       userId,
-      messages: allMessages as never,
+      messages: [...userMessages, { role: "assistant", content: assistantReply }] as never,
       provider,
-      model: "llama-3.3-70b-versatile",
+      model,
     },
   });
 }
