@@ -12,6 +12,7 @@ import {
   LogOut,
   Dumbbell,
   Bot,
+  TrendingUp,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
@@ -21,6 +22,7 @@ const navItems = [
   { href: "/activities", label: "Actividades", icon: Activity },
   { href: "/brain", label: "Running Brain", icon: Brain },
   { href: "/coach", label: "Coach AI", icon: Bot },
+  { href: "/progress", label: "Progreso", icon: TrendingUp },
   { href: "/goals", label: "Objetivos", icon: Target },
   { href: "/events", label: "Carreras", icon: Calendar },
   { href: "/strength", label: "Fuerza", icon: Dumbbell },
