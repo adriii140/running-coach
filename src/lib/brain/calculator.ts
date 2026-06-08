@@ -24,8 +24,8 @@ export async function recalculateBrain(userId: string): Promise<void> {
   );
 
   const records = calculatePersonalRecords(runActivities);
-  const paces = calculatePaceZones(records);
   const hrStats = calculateHRStats(runActivities);
+  const paces = calculatePaceZones(records, runActivities, hrStats.hrMax);
   const load = calculateTrainingLoad(runActivities);
   const vo2max = estimateVO2max(records);
 
@@ -87,7 +87,16 @@ type ActivityRow = {
   distance: number | null;
   movingTime: number;
   startDate: Date;
+  averageHeartrate?: number | null;
+  maxHeartrate?: number | null;
 };
+
+// Factores de conversión de pace: si corres X km, tu mejor split de Y km
+// equivale a tu pace * factor (Y < X → vas más rápido al acortar la distancia)
+// Basado en la fórmula de Riegel: t2 = t1 * (d2/d1)^1.06
+function riegelConvert(timeSec: number, fromDistM: number, toDistM: number): number {
+  return Math.round(timeSec * Math.pow(toDistM / fromDistM, 1.06));
+}
 
 function calculatePersonalRecords(activities: ActivityRow[]) {
   const records: Record<string, number | null | Date> = {
@@ -99,60 +108,42 @@ function calculatePersonalRecords(activities: ActivityRow[]) {
     bestMarathonSec: null, bestMarathonDate: null,
   };
 
+  // Targets: [targetDistM, secField, dateField, minSourceDistM]
+  const TARGETS = [
+    { distM: 1000,  secField: "best1kSec",      dateField: "best1kDate",      minSrcM: 900   },
+    { distM: 3000,  secField: "best3kSec",       dateField: "best3kDate",      minSrcM: 2800  },
+    { distM: 5000,  secField: "best5kSec",       dateField: "best5kDate",      minSrcM: 4500  },
+    { distM: 10000, secField: "best10kSec",      dateField: "best10kDate",     minSrcM: 9000  },
+    { distM: 21097, secField: "bestHalfSec",     dateField: "bestHalfDate",    minSrcM: 19000 },
+    { distM: 42195, secField: "bestMarathonSec", dateField: "bestMarathonDate",minSrcM: 39000 },
+  ];
+
   for (const activity of activities) {
     if (!activity.distance || activity.movingTime <= 0) continue;
-
     const distM = activity.distance;
+    // Filtro de ritmo mínimo razonable (< 3:00/km es imposible, > 15:00/km es andar)
+    const paceSecKm = (activity.movingTime / distM) * 1000;
+    if (paceSecKm < 180 || paceSecKm > 900) continue;
 
-    for (const [key, window] of Object.entries(PR_DISTANCE_WINDOWS)) {
-      if (distM < window.minM || distM > window.maxM) continue;
+    for (const target of TARGETS) {
+      // La actividad debe tener al menos la distancia mínima para este target
+      if (distM < target.minSrcM) continue;
 
-      // Calcular ritmo por km equivalente a la distancia del récord
-      const targetDistM =
-        key === "1k" ? 1000
-        : key === "3k" ? 3000
-        : key === "5k" ? 5000
-        : key === "10k" ? 10000
-        : key === "half" ? 21097
-        : 42195;
+      // Si la actividad es más larga que el target, aplicar corrección Riegel
+      // Si es dentro del ±10% del target, usarla directamente (más preciso)
+      let estimatedTime: number;
+      if (distM >= target.distM * 0.90 && distM <= target.distM * 1.15) {
+        // Actividad muy cercana a la distancia objetivo: normalizar directamente
+        estimatedTime = Math.round((activity.movingTime / distM) * target.distM);
+      } else {
+        // Actividad más larga: estimar el split con Riegel
+        estimatedTime = riegelConvert(activity.movingTime, distM, target.distM);
+      }
 
-      // Normalizar tiempo a la distancia objetivo (ritmo constante asumido)
-      const secPerM = activity.movingTime / distM;
-      const timeSec = Math.round(secPerM * targetDistM);
-
-      const recordKey = `best${key.charAt(0).toUpperCase() + key.slice(1)}Sec`
-        .replace("1kSec", "1kSec")
-        .replace("3kSec", "3kSec")
-        .replace("5kSec", "5kSec")
-        .replace("10kSec", "10kSec")
-        .replace("HalfSec", "HalfSec")
-        .replace("MarathonSec", "MarathonSec");
-
-      const dateKey = recordKey.replace("Sec", "Date");
-
-      // Nombres explícitos para evitar errores de mapeo
-      const secField = ({
-        "1k": "best1kSec",
-        "3k": "best3kSec",
-        "5k": "best5kSec",
-        "10k": "best10kSec",
-        "half": "bestHalfSec",
-        "marathon": "bestMarathonSec",
-      } as Record<string, string>)[key];
-
-      const dateField = ({
-        "1k": "best1kDate",
-        "3k": "best3kDate",
-        "5k": "best5kDate",
-        "10k": "best10kDate",
-        "half": "bestHalfDate",
-        "marathon": "bestMarathonDate",
-      } as Record<string, string>)[key];
-
-      const current = records[secField] as number | null;
-      if (current === null || timeSec < current) {
-        records[secField] = timeSec;
-        records[dateField] = activity.startDate;
+      const current = records[target.secField] as number | null;
+      if (current === null || estimatedTime < current) {
+        records[target.secField] = estimatedTime;
+        records[target.dateField] = activity.startDate;
       }
     }
   }
@@ -161,42 +152,98 @@ function calculatePersonalRecords(activities: ActivityRow[]) {
 }
 
 // ─────────────────────────────────────────
-// ZONAS DE RITMO (fórmula Daniels VDOT)
+// ZONAS DE RITMO (HR-based LTHR + Daniels fallback)
 // ─────────────────────────────────────────
 
-function calculatePaceZones(records: Record<string, number | null | Date>) {
-  // Usar el mejor 5K o 10K como referencia
-  const ref5k = records.best5kSec as number | null;
+function calculatePaceZones(
+  records: Record<string, number | null | Date>,
+  activities: ActivityRow[],
+  hrMax: number | null,
+) {
+  const ref5k  = records.best5kSec  as number | null;
   const ref10k = records.best10kSec as number | null;
+  const refHalf = records.bestHalfSec as number | null;
 
-  if (!ref5k && !ref10k) {
-    return {
-      paceRecoverySec: null,
-      paceEasySec: null,
-      paceAerobicSec: null,
-      paceTempoSec: null,
-      paceThresholdSec: null,
-      paceRaceSec: null,
-    };
+  const nullResult = {
+    paceRecoverySec: null, paceEasySec: null, paceAerobicSec: null,
+    paceTempoSec: null, paceThresholdSec: null, paceRaceSec: null,
+  };
+
+  // ── Estrategia 1: LTHR desde FC ──────────────────────────────────────────
+  if (hrMax && hrMax > 100) {
+    const lthrMin = hrMax * 0.82;
+    const lthrMax = hrMax * 0.92;
+    const thresholdRuns = activities.filter((a) => {
+      const hr = a.averageHeartrate ?? null;
+      const distKm = (a.distance ?? 0) / 1000;
+      return hr !== null && hr >= lthrMin && hr <= lthrMax && distKm >= 3;
+    });
+    if (thresholdRuns.length >= 2) {
+      const sorted = thresholdRuns
+        .slice().sort((a, b) => b.startDate.getTime() - a.startDate.getTime())
+        .slice(0, 10);
+      const paces = sorted.map((a) => a.movingTime / ((a.distance ?? 1) / 1000));
+      const thresholdSecKm = Math.round(paces.reduce((s, p) => s + p, 0) / paces.length);
+      return buildPaceZones(thresholdSecKm, ref5k, ref10k);
+    }
   }
 
-  // Ritmo umbral ≈ ritmo 10K * 1.045 (factor Daniels)
-  let thresholdSecKm: number;
-  if (ref10k) {
-    const paceRef = ref10k / 10; // seg/km para 10K
-    thresholdSecKm = Math.round(paceRef * 1.045);
+  // ── Estrategia 2: Mejor ritmo de carreras largas recientes ───────────────
+  // Usa runs ≥5km. Coge el percentil 10 más rápido (excluye picos anómalos)
+  // y asume que eso es cercano al umbral real.
+  const longRuns = activities
+    .filter((a) => (a.distance ?? 0) >= 5000 && a.movingTime > 0)
+    .map((a) => ({ pace: a.movingTime / ((a.distance ?? 1) / 1000), date: a.startDate }))
+    .filter((a) => a.pace > 120 && a.pace < 800) // entre 2:00 y 13:20 /km
+    .sort((a, b) => a.pace - b.pace); // más rápido primero
+
+  if (longRuns.length >= 3) {
+    // Percentil 20 más rápido: representa esfuerzo alto pero no máximo
+    const p20idx = Math.max(0, Math.floor(longRuns.length * 0.20) - 1);
+    const fastPace = longRuns[p20idx].pace;
+    // El umbral ≈ ritmo del 20% más rápido de tus runs largos
+    const thresholdSecKm = Math.round(fastPace);
+    return buildPaceZones(thresholdSecKm, ref5k, ref10k);
+  }
+
+  // ── Estrategia 3: desde el mejor PR disponible (modelo Strava) ──────────
+  // Strava: umbral ≈ 0.93x ritmo_5k (Z4), Z3 ≈ 1.00x ritmo_5k
+  // Es decir: umbral es MÁS RÁPIDO que el ritmo de carrera en 5K
+  if (!ref5k && !ref10k && !refHalf) return nullResult;
+
+  let pace5kSecPerKm: number;
+  if (ref5k) {
+    pace5kSecPerKm = ref5k / 5;
+  } else if (ref10k) {
+    pace5kSecPerKm = (ref10k / 10) * 0.93; // 5K ≈ 7% más rápido que 10K
   } else {
-    const paceRef = ref5k! / 5;
-    thresholdSecKm = Math.round(paceRef * 1.08);
+    pace5kSecPerKm = (refHalf! / 21.097) * 0.87; // 5K ≈ 13% más rápido que media
   }
 
+  // Z4 bottom (threshold) = 93% del ritmo 5K (más rápido → menos segundos/km)
+  const thresholdSecKm = Math.round(pace5kSecPerKm * 0.93);
+
+  return buildPaceZones(thresholdSecKm, ref5k, ref10k);
+}
+
+function buildPaceZones(
+  thresholdSecKm: number,  // Z4 bottom = 0.93x pace_5K
+  ref5k: number | null,
+  ref10k: number | null,
+) {
+  // Reconstruir el ritmo de 5K desde el umbral para derivar el resto
+  const pace5k = thresholdSecKm / 0.93;
   return {
-    paceThresholdSec: thresholdSecKm,
-    paceTempoSec: Math.round(thresholdSecKm * 1.04),
-    paceAerobicSec: Math.round(thresholdSecKm * 1.1),
-    paceEasySec: Math.round(thresholdSecKm * 1.2),
-    paceRecoverySec: Math.round(thresholdSecKm * 1.35),
-    paceRaceSec: ref10k ? Math.round(ref10k / 10) : Math.round(ref5k! / 5),
+    paceThresholdSec: thresholdSecKm,              // Z4 ≈ <5K pace
+    paceTempoSec:     Math.round(pace5k),           // Z3 top ≈ 5K pace
+    paceAerobicSec:   Math.round(pace5k * 1.10),   // Z3/Z2 boundary
+    paceEasySec:      Math.round(pace5k * 1.28),   // Z2/Z1 boundary
+    paceRecoverySec:  Math.round(pace5k * 1.42),   // Z1
+    paceRaceSec: ref10k
+      ? Math.round(ref10k / 10)
+      : ref5k
+        ? Math.round(ref5k / 5)
+        : null,
   };
 }
 

@@ -118,7 +118,7 @@ function MapModal({ activity, onClose }: { activity: Activity; onClose: () => vo
   const km = activity.distance ? (activity.distance / 1000).toFixed(2) : null;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4" onClick={onClose}>
+    <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/70 p-4" onClick={onClose}>
       <div
         className="w-full max-w-2xl bg-background border border-border rounded-2xl overflow-hidden shadow-2xl"
         onClick={(e) => e.stopPropagation()}
@@ -150,6 +150,7 @@ function MapModal({ activity, onClose }: { activity: Activity; onClose: () => vo
             polyline={activity.mapPolyline}
             className="w-full"
             interactive
+            averageHeartrate={activity.averageHeartrate}
             style={{ height: 400 } as React.CSSProperties}
           />
         )}

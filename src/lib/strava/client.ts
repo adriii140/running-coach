@@ -98,6 +98,18 @@ export async function getStravaActivityLaps(
   return res.json();
 }
 
+// Zonas de ritmo y FC configuradas por el atleta en Strava
+export async function getStravaZones(accessToken: string): Promise<{
+  pace?: { zones: { min: number; max: number }[] };
+  heart_rate?: { custom_zones: boolean; zones: { min: number; max: number }[] };
+} | null> {
+  const res = await fetch(`${STRAVA_API}/athlete/zones`, {
+    headers: { Authorization: `Bearer ${accessToken}` },
+  });
+  if (!res.ok) return null;
+  return res.json();
+}
+
 // Sincronización completa paginada con manejo de rate limit
 export async function fetchAllStravaActivities(
   accessToken: string,

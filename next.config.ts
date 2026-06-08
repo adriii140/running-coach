@@ -1,11 +1,12 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
+  allowedDevOrigins: ["192.168.1.107"],
   images: {
     remotePatterns: [
       {
         protocol: "https",
-        hostname: "*.cloudfront.net", // fotos de perfil de Strava
+        hostname: "*.cloudfront.net",
       },
       {
         protocol: "https",
@@ -15,7 +16,7 @@ const nextConfig: NextConfig = {
   },
   experimental: {
     serverActions: {
-      allowedOrigins: ["localhost:3000"],
+      allowedOrigins: ["localhost:3000", "192.168.1.107:3000"],
     },
   },
 };

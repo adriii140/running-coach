@@ -1,6 +1,9 @@
 import { redirect } from "next/navigation";
 import { getSession } from "@/lib/auth/session";
 import { BrainStats } from "@/components/dashboard/BrainStats";
+import { ThresholdOverride } from "@/components/dashboard/ThresholdOverride";
+
+export const dynamic = "force-dynamic";
 
 export default async function BrainPage() {
   const session = await getSession();
@@ -32,6 +35,7 @@ export default async function BrainPage() {
         </p>
       </div>
       <BrainStats brain={brain} />
+      <ThresholdOverride currentThresholdSec={brain?.paceThresholdSec ?? null} />
       {brain?.updatedAt && (
         <p className="text-xs text-muted-foreground text-right">
           Actualizado: {new Date(brain.updatedAt).toLocaleString("es-ES")}

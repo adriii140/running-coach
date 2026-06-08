@@ -10,7 +10,10 @@ export async function POST(req: NextRequest) {
   if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
   const body = await req.json();
-  const { lat, lng, distanceKm, surface, routeType, askAI } = body;
+  const {
+    lat, lng, distanceKm, askAI,
+    preference, avoidFeatures, maxElevationGainM, boundingPolygon, seed,
+  } = body;
 
   if (!lat || !lng || !distanceKm) {
     return NextResponse.json({ error: "lat, lng y distanceKm son obligatorios" }, { status: 400 });
@@ -52,14 +55,17 @@ export async function POST(req: NextRequest) {
     }
   }
 
-  // Generar la ruta con ORS
+  // Generar la ruta con ORS (5 candidatos en paralelo, elige el mejor)
   try {
     const route = await generateRoute({
       startLat: parseFloat(lat),
       startLng: parseFloat(lng),
       distanceKm: parseFloat(distanceKm),
-      routeType: routeType ?? "loop",
-      surface: surface ?? "asphalt",
+      preference: preference ?? "recommended",
+      avoidFeatures: avoidFeatures ?? [],
+      maxElevationGainM: maxElevationGainM ?? undefined,
+      boundingPolygon: boundingPolygon ?? undefined,
+      seed: seed ?? undefined,
     });
 
     // Guardar en DB
@@ -70,12 +76,11 @@ export async function POST(req: NextRequest) {
         distanceKm: route.distanceKm,
         durationMin: route.durationMin,
         elevationM: route.elevationM,
-        type: routeType === "loop" ? "CIRCULAR" : "OUT_AND_BACK",
+        type: "CIRCULAR",
         startLat: parseFloat(lat),
         startLng: parseFloat(lng),
         geometry: route.geometry as never,
         waypoints: route.waypoints as never,
-        surface,
         notes: aiRecommendation ?? undefined,
       },
     });

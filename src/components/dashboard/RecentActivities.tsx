@@ -29,20 +29,20 @@ interface RecentActivitiesProps {
 }
 
 const activityColors: Record<string, string> = {
-  RUN: "bg-blue-500/10 text-blue-600 dark:text-blue-400",
-  TRAIL_RUN: "bg-green-500/10 text-green-600 dark:text-green-400",
-  VIRTUAL_RUN: "bg-cyan-500/10 text-cyan-600 dark:text-cyan-400",
-  STRENGTH: "bg-orange-500/10 text-orange-600 dark:text-orange-400",
-  CYCLING: "bg-yellow-500/10 text-yellow-600 dark:text-yellow-400",
-  SWIMMING: "bg-indigo-500/10 text-indigo-600 dark:text-indigo-400",
-  WALKING: "bg-gray-500/10 text-gray-600 dark:text-gray-400",
-  OTHER: "bg-gray-500/10 text-gray-600 dark:text-gray-400",
+  RUN: "bg-blue-500/10 text-blue-400 border-blue-500/20",
+  TRAIL_RUN: "bg-green-500/10 text-green-400 border-green-500/20",
+  VIRTUAL_RUN: "bg-cyan-500/10 text-cyan-400 border-cyan-500/20",
+  STRENGTH: "bg-orange-500/10 text-orange-400 border-orange-500/20",
+  CYCLING: "bg-yellow-500/10 text-yellow-400 border-yellow-500/20",
+  SWIMMING: "bg-indigo-500/10 text-indigo-400 border-indigo-500/20",
+  WALKING: "bg-gray-500/10 text-gray-400 border-gray-500/20",
+  OTHER: "bg-gray-500/10 text-gray-400 border-gray-500/20",
 };
 
 export function RecentActivities({ activities }: RecentActivitiesProps) {
   if (activities.length === 0) {
     return (
-      <Card className="border-border/50">
+      <Card className="border-border/40 bg-card/50 backdrop-blur-sm">
         <CardHeader className="pb-3">
           <CardTitle className="text-base">Actividades recientes</CardTitle>
         </CardHeader>
@@ -56,27 +56,29 @@ export function RecentActivities({ activities }: RecentActivitiesProps) {
   }
 
   return (
-    <Card className="border-border/50">
+    <Card className="border-border/40 bg-card/50 backdrop-blur-sm">
       <CardHeader className="pb-3">
         <CardTitle className="text-base">Actividades recientes</CardTitle>
       </CardHeader>
       <CardContent className="p-0">
-        <div className="divide-y divide-border/50">
+        <div className="divide-y divide-border/30">
           {activities.map((activity) => {
             const pace = activity.averageSpeed
               ? speedToSecPerKm(activity.averageSpeed)
               : null;
+            const colorClass =
+              activityColors[activity.activityType] ?? activityColors.OTHER;
 
             return (
               <div
                 key={activity.id}
-                className="flex items-center gap-3 px-6 py-3 hover:bg-muted/30 transition-colors"
+                className="flex items-center gap-3 px-5 py-3.5 hover:bg-muted/20 transition-colors"
               >
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2 mb-1">
                     <Badge
-                      variant="secondary"
-                      className={`text-xs px-1.5 py-0 ${activityColors[activity.activityType] ?? activityColors.OTHER}`}
+                      variant="outline"
+                      className={`text-xs px-1.5 py-0 border ${colorClass}`}
                     >
                       {activityTypeLabel(activity.activityType)}
                     </Badge>
@@ -85,7 +87,7 @@ export function RecentActivities({ activities }: RecentActivitiesProps) {
                     </span>
                   </div>
                   <p className="text-sm font-medium truncate">{activity.name}</p>
-                  <div className="flex items-center gap-3 mt-1 text-xs text-muted-foreground">
+                  <div className="flex items-center gap-3 mt-1 text-xs text-muted-foreground flex-wrap">
                     {activity.distance && (
                       <span className="flex items-center gap-1">
                         <MapPin className="h-3 w-3" />
@@ -110,9 +112,10 @@ export function RecentActivities({ activities }: RecentActivitiesProps) {
                   </div>
                 </div>
                 {activity.totalElevation && activity.totalElevation > 10 && (
-                  <div className="text-right text-xs text-muted-foreground shrink-0">
-                    <span className="text-orange-500">↑</span>{" "}
-                    {Math.round(activity.totalElevation)}m
+                  <div className="text-right text-xs shrink-0">
+                    <span className="text-orange-400 font-semibold">
+                      ↑ {Math.round(activity.totalElevation)}m
+                    </span>
                   </div>
                 )}
               </div>

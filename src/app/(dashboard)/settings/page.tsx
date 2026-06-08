@@ -45,14 +45,14 @@ export default async function SettingsPage() {
             <span className="text-sm font-medium">{session.name}</span>
           </div>
           <div className="flex justify-between py-2">
-            <span className="text-sm text-muted-foreground">Strava ID</span>
-            <span className="text-sm font-mono">{session.stravaId}</span>
+            <span className="text-sm text-muted-foreground">Strava</span>
+            <Badge variant="outline" className="text-green-500 border-green-500/30 gap-1">
+              <CheckCircle className="h-3 w-3" /> Conectado
+            </Badge>
           </div>
           <div className="flex justify-between py-2">
-            <span className="text-sm text-muted-foreground">Token expira</span>
-            <span className="text-sm text-muted-foreground">
-              {new Date(session.stravaTokenExpiry * 1000).toLocaleString("es-ES")}
-            </span>
+            <span className="text-sm text-muted-foreground">Sesión</span>
+            <span className="text-sm text-muted-foreground">Válida 30 días desde el último login</span>
           </div>
         </CardContent>
       </Card>
@@ -69,7 +69,6 @@ export default async function SettingsPage() {
           <EnvStatus value={process.env.OPENROUTESERVICE_API_KEY} label="OPENROUTESERVICE_API_KEY" />
           <EnvStatus value={process.env.OPENROUTER_API_KEY} label="OPENROUTER_API_KEY" />
           <EnvStatus value={process.env.GROQ_API_KEY} label="GROQ_API_KEY" />
-          <EnvStatus value={process.env.OLLAMA_URL} label="OLLAMA_URL" />
         </CardContent>
       </Card>
     </div>

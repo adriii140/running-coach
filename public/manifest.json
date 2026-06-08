@@ -1,0 +1,19 @@
+{
+  "name": "RunCoach",
+  "short_name": "RunCoach",
+  "description": "Tu entrenador personal inteligente para running",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#09090b",
+  "theme_color": "#f97316",
+  "orientation": "portrait-primary",
+  "categories": ["sports", "health", "fitness"],
+  "icons": [
+    { "src": "/icons/icon.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "/icons/icon.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ],
+  "shortcuts": [
+    { "name": "Generar ruta", "url": "/routes", "description": "Genera una ruta de entrenamiento" },
+    { "name": "Coach AI", "url": "/coach", "description": "Habla con tu entrenador" }
+  ]
+}

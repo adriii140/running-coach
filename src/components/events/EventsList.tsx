@@ -3,10 +3,10 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import {
-  MapPin, Calendar, Trophy, ExternalLink, Trash2,
+  MapPin, Calendar, Trophy, ExternalLink, Trash2, Pencil,
   CheckCircle2, Clock, Flag, Zap, Mountain, Users, Bike, Star
 } from "lucide-react";
-import { EventForm } from "./EventForm";
+import { EventForm, type EventData } from "./EventForm";
 
 interface SportEvent {
   id: string;
@@ -64,16 +64,21 @@ function DaysChip({ days }: { days: number }) {
 export function EventsList({ initialEvents }: EventsListProps) {
   const [events, setEvents] = useState<SportEvent[]>(initialEvents);
   const [showForm, setShowForm] = useState(false);
+  const [editingEvent, setEditingEvent] = useState<SportEvent | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const router = useRouter();
 
-  const handleSaved = () => {
-    setShowForm(false);
-    router.refresh();
-    // Recargamos los eventos
+  const refreshEvents = () => {
     fetch("/api/events")
       .then((r) => r.json())
       .then((data) => setEvents(data));
+    router.refresh();
+  };
+
+  const handleSaved = () => {
+    setShowForm(false);
+    setEditingEvent(null);
+    refreshEvents();
   };
 
   const handleDelete = async (id: string) => {
@@ -100,6 +105,23 @@ export function EventsList({ initialEvents }: EventsListProps) {
   return (
     <>
       {showForm && <EventForm onClose={() => setShowForm(false)} onSaved={handleSaved} />}
+      {editingEvent && (
+        <EventForm
+          onClose={() => setEditingEvent(null)}
+          onSaved={handleSaved}
+          initialEvent={{
+            ...editingEvent,
+            date: editingEvent.date,
+            distanceKm: editingEvent.distanceKm,
+            city: editingEvent.city,
+            country: editingEvent.country,
+            url: editingEvent.url,
+            price: editingEvent.price,
+            elevationGain: editingEvent.elevationGain,
+            notes: editingEvent.notes,
+          } as EventData}
+        />
+      )}
 
       <div className="space-y-6">
         {/* Header */}
@@ -128,6 +150,7 @@ export function EventsList({ initialEvents }: EventsListProps) {
                   key={event.id}
                   event={event}
                   onDelete={handleDelete}
+                  onEdit={setEditingEvent}
                   onToggleRegistered={handleToggleRegistered}
                   deleting={deletingId === event.id}
                 />
@@ -146,6 +169,7 @@ export function EventsList({ initialEvents }: EventsListProps) {
                   key={event.id}
                   event={event}
                   onDelete={handleDelete}
+                  onEdit={setEditingEvent}
                   onToggleRegistered={handleToggleRegistered}
                   deleting={deletingId === event.id}
                 />
@@ -180,11 +204,13 @@ export function EventsList({ initialEvents }: EventsListProps) {
 function EventCard({
   event,
   onDelete,
+  onEdit,
   onToggleRegistered,
   deleting,
 }: {
   event: SportEvent;
   onDelete: (id: string) => void;
+  onEdit: (e: SportEvent) => void;
   onToggleRegistered: (e: SportEvent) => void;
   deleting: boolean;
 }) {
@@ -241,7 +267,7 @@ function EventCard({
       {/* Right side */}
       <div className="shrink-0 flex flex-col items-end gap-2">
         <DaysChip days={days} />
-        <div className="flex items-center gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+        <div className="flex items-center gap-2 lg:opacity-0 lg:group-hover:opacity-100 transition-opacity">
           <button
             onClick={() => onToggleRegistered(event)}
             title={event.registered ? "Inscrito" : "Marcar como inscrito"}
@@ -254,6 +280,13 @@ function EventCard({
               <ExternalLink className="h-4 w-4" />
             </a>
           )}
+          <button
+            onClick={() => onEdit(event)}
+            className="text-muted-foreground hover:text-foreground transition-colors"
+            title="Editar evento"
+          >
+            <Pencil className="h-4 w-4" />
+          </button>
           <button
             onClick={() => onDelete(event.id)}
             disabled={deleting}

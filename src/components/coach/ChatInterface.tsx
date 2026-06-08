@@ -1,7 +1,8 @@
 "use client";
 
 import { useState, useRef, useEffect, useCallback } from "react";
-import { Send, Bot, User, Loader2, RotateCcw, ChevronDown } from "lucide-react";
+import { Send, Bot, User, Loader2, RotateCcw, ChevronDown, Sparkles } from "lucide-react";
+import ReactMarkdown from "react-markdown";
 
 interface Message {
   role: "user" | "assistant";
@@ -15,13 +16,73 @@ interface ModelOption {
   description: string;
 }
 
-const SUGGESTED_QUESTIONS = [
-  "¿Cómo está mi forma física ahora mismo?",
-  "¿Qué ritmo debería usar para mis rodajes fáciles?",
-  "¿Cuánto debería correr esta semana?",
-  "¿Cómo puedo mejorar mi VO2max?",
-  "¿Estoy listo para competir?",
-];
+interface CoachContext {
+  tsb: number | null;
+  weeklyLoadKm: number | null;
+  vo2max: number | null;
+  has5k: boolean;
+  nextRace: {
+    name: string;
+    daysUntil: number | null;
+    distanceKm: number | null;
+    isPrimary: boolean;
+  } | null;
+}
+
+function buildSuggestedQuestions(ctx: CoachContext | null): string[] {
+  if (!ctx) return [
+    "¿Cómo está mi forma física ahora mismo?",
+    "¿Qué ritmo debería usar para mis rodajes fáciles?",
+    "¿Cuánto debería correr esta semana?",
+    "¿Cómo puedo mejorar mi VO2max?",
+  ];
+
+  const questions: string[] = [];
+
+  // Preguntas sobre la carrera próxima
+  if (ctx.nextRace) {
+    const { name, daysUntil, distanceKm } = ctx.nextRace;
+    if (daysUntil !== null && daysUntil <= 10) {
+      questions.push(`Tengo ${name} en ${daysUntil} días, ¿qué hago esta semana?`);
+      questions.push(`¿Debo hacer tapering antes de ${name}?`);
+    } else if (daysUntil !== null && daysUntil <= 30) {
+      questions.push(`¿Cómo enfoco las próximas semanas antes de ${name}?`);
+      questions.push(distanceKm
+        ? `Dame un plan para preparar los ${distanceKm} km de ${name}`
+        : `Dame un plan de las últimas semanas antes de ${name}`);
+    } else if (daysUntil !== null) {
+      questions.push(`Tengo ${name} en ${daysUntil} días, ¿cómo planifico el entrenamiento?`);
+    }
+  }
+
+  // Preguntas según TSB (forma)
+  if (ctx.tsb !== null) {
+    if (ctx.tsb > 10) {
+      questions.push("Estoy descansado, ¿puedo hacer una sesión de calidad hoy?");
+    } else if (ctx.tsb < -20) {
+      questions.push("Noto que estoy cargado, ¿cuánto descanso necesito?");
+    } else {
+      questions.push("¿Qué tipo de entrenamiento me recomiendas hoy?");
+    }
+  }
+
+  // Preguntas según carga semanal
+  if (ctx.weeklyLoadKm !== null) {
+    if (ctx.weeklyLoadKm < 10) {
+      questions.push("¿Cuánto debería correr esta semana para progresar?");
+    } else {
+      questions.push(`Llevo ${Math.round(ctx.weeklyLoadKm)} km esta semana, ¿continúo o reduzco?`);
+    }
+  }
+
+  // Preguntas generales de calidad
+  questions.push("¿Cómo está mi forma física ahora mismo?");
+  if (!ctx.has5k) questions.push("¿Cómo puedo establecer mi primer récord en 5K?");
+  if (ctx.vo2max) questions.push(`Tengo un VO2max de ${Math.round(ctx.vo2max)}, ¿cómo lo mejoro?`);
+  questions.push("Dame un plan de entrenamiento para esta semana");
+
+  return questions.slice(0, 5);
+}
 
 export function ChatInterface() {
   const [messages, setMessages] = useState<Message[]>([]);
@@ -31,6 +92,7 @@ export function ChatInterface() {
   const [models, setModels] = useState<ModelOption[]>([]);
   const [selectedModel, setSelectedModel] = useState<string>("");
   const [showModelPicker, setShowModelPicker] = useState(false);
+  const [ctx, setCtx] = useState<CoachContext | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const abortRef = useRef<AbortController | null>(null);
@@ -44,6 +106,11 @@ export function ChatInterface() {
           setSelectedModel(data.defaultModelId);
         }
       })
+      .catch(() => {});
+
+    fetch("/api/coach/context")
+      .then((r) => r.json())
+      .then(setCtx)
       .catch(() => {});
   }, []);
 
@@ -60,14 +127,10 @@ export function ChatInterface() {
       const newMessages = [...messages, userMessage];
       setMessages(newMessages);
       setInput("");
-
-      // Ajustar altura del textarea
       if (textareaRef.current) textareaRef.current.style.height = "auto";
 
       setIsStreaming(true);
       abortRef.current = new AbortController();
-
-      // Añadir placeholder del assistant
       setMessages((prev) => [...prev, { role: "assistant", content: "" }]);
 
       try {
@@ -90,8 +153,7 @@ export function ChatInterface() {
         while (true) {
           const { done, value } = await reader.read();
           if (done) break;
-          const chunk = decoder.decode(value, { stream: true });
-          accumulated += chunk;
+          accumulated += decoder.decode(value, { stream: true });
           setMessages((prev) => {
             const updated = [...prev];
             updated[updated.length - 1] = { role: "assistant", content: accumulated };
@@ -99,19 +161,15 @@ export function ChatInterface() {
           });
         }
       } catch (err: unknown) {
-        if (err instanceof Error && err.name === "AbortError") {
-          // El usuario canceló
-          return;
-        }
-        const msg = err instanceof Error ? err.message : "Error al conectar con el Coach";
-        setError(msg);
-        setMessages((prev) => prev.slice(0, -1)); // quitar placeholder vacío
+        if (err instanceof Error && err.name === "AbortError") return;
+        setError(err instanceof Error ? err.message : "Error al conectar con el Coach");
+        setMessages((prev) => prev.slice(0, -1));
       } finally {
         setIsStreaming(false);
         abortRef.current = null;
       }
     },
-    [messages, isStreaming]
+    [messages, isStreaming, selectedModel]
   );
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
@@ -134,43 +192,69 @@ export function ChatInterface() {
     setIsStreaming(false);
   };
 
+  const suggestedQuestions = buildSuggestedQuestions(ctx);
   const currentModel = models.find((m) => m.id === selectedModel);
 
   return (
     <div className="flex flex-col h-[calc(100vh-10rem)] max-w-3xl mx-auto">
       {/* Mensajes */}
-      <div className="flex-1 overflow-y-auto space-y-4 pb-4">
+      <div className="flex-1 overflow-y-auto space-y-6 pb-4">
+
+        {/* Estado vacío */}
         {messages.length === 0 && (
-          <div className="flex flex-col items-center justify-center h-full gap-6 text-center">
-            <div className="rounded-full bg-primary/10 p-4">
-              <Bot className="h-8 w-8 text-primary" />
+          <div className="flex flex-col items-center justify-center h-full gap-5 text-center px-2">
+            <div className="rounded-2xl bg-orange-500/10 border border-orange-500/20 p-4">
+              <Bot className="h-8 w-8 text-orange-400" />
             </div>
             <div>
-              <h2 className="text-lg font-semibold">Tu Coach AI personal</h2>
-              <p className="text-sm text-muted-foreground mt-1 max-w-sm">
-                Analizo tus datos de entrenamiento para darte consejos personalizados.
+              <h2 className="text-lg font-bold">Coach AI</h2>
+              <p className="text-sm text-muted-foreground mt-1 max-w-xs">
+                Tengo acceso a todos tus datos: actividades, forma física, carreras y objetivos.
               </p>
             </div>
-            <div className="flex flex-col gap-2 w-full max-w-sm">
-              {SUGGESTED_QUESTIONS.map((q) => (
+
+            {/* Preguntas dinámicas */}
+            <div className="w-full max-w-md space-y-2">
+              <p className="text-xs text-muted-foreground flex items-center justify-center gap-1">
+                <Sparkles className="h-3 w-3" /> Sugerencias para ti
+              </p>
+              {suggestedQuestions.map((q) => (
                 <button
                   key={q}
                   onClick={() => sendMessage(q)}
-                  className="text-sm text-left px-4 py-2 rounded-lg border border-border/60 hover:border-primary/50 hover:bg-primary/5 transition-colors text-muted-foreground hover:text-foreground"
+                  className="w-full text-sm text-left px-4 py-2.5 rounded-xl border border-border/50 hover:border-orange-500/40 hover:bg-orange-500/5 transition-all text-muted-foreground hover:text-foreground active:scale-[0.98]"
                 >
                   {q}
                 </button>
               ))}
             </div>
+
+            {/* Info de carrera próxima */}
+            {ctx?.nextRace && (
+              <div className="w-full max-w-md rounded-xl border border-orange-500/20 bg-orange-500/5 px-4 py-3 text-left">
+                <p className="text-xs text-orange-400 font-medium mb-1">Próxima carrera</p>
+                <p className="text-sm font-semibold">{ctx.nextRace.name}</p>
+                <p className="text-xs text-muted-foreground">
+                  En {ctx.nextRace.daysUntil} días
+                  {ctx.nextRace.distanceKm ? ` · ${ctx.nextRace.distanceKm} km` : ""}
+                </p>
+              </div>
+            )}
           </div>
         )}
 
+        {/* Mensajes */}
         {messages.map((msg, i) => (
-          <MessageBubble key={i} message={msg} isLast={i === messages.length - 1} isStreaming={isStreaming} />
+          <MessageBubble
+            key={i}
+            message={msg}
+            isLast={i === messages.length - 1}
+            isStreaming={isStreaming}
+          />
         ))}
 
         {error && (
-          <div className="rounded-lg bg-destructive/10 border border-destructive/20 px-4 py-3 text-sm text-destructive">
+          <div className="rounded-xl bg-destructive/10 border border-destructive/20 px-4 py-3 text-sm text-destructive">
             {error}
           </div>
         )}
@@ -178,10 +262,10 @@ export function ChatInterface() {
         <div ref={bottomRef} />
       </div>
 
-      {/* Input */}
-      <div className="border-t border-border/50 pt-4">
-        <div className="flex items-center justify-between mb-2">
-          {/* Selector de modelo */}
+      {/* Input area */}
+      <div className="border-t border-border/50 pt-3 space-y-2">
+        {/* Controles superiores */}
+        <div className="flex items-center justify-between">
           {models.length > 0 && (
             <div className="relative">
               <button
@@ -198,7 +282,7 @@ export function ChatInterface() {
                     <button
                       key={m.id}
                       onClick={() => { setSelectedModel(m.id); setShowModelPicker(false); }}
-                      className={`w-full text-left px-4 py-2.5 hover:bg-muted/60 transition-colors border-b border-border/30 last:border-0 ${m.id === selectedModel ? "bg-primary/10" : ""}`}
+                      className={`w-full text-left px-4 py-2.5 hover:bg-muted/60 transition-colors border-b border-border/30 last:border-0 ${m.id === selectedModel ? "bg-orange-500/10 text-orange-400" : ""}`}
                     >
                       <div className="text-sm font-medium">{m.label}</div>
                       <div className="text-xs text-muted-foreground mt-0.5">{m.description}</div>
@@ -218,30 +302,30 @@ export function ChatInterface() {
             </button>
           )}
         </div>
-        <div className="relative flex items-end gap-2 bg-muted/30 border border-border/60 rounded-xl px-4 py-3 focus-within:border-primary/50 transition-colors">
+
+        {/* Textarea + enviar */}
+        <div className="relative flex items-end gap-2 bg-muted/30 border border-border/60 rounded-xl px-4 py-3 focus-within:border-orange-500/40 transition-colors">
           <textarea
             ref={textareaRef}
             value={input}
             onChange={handleTextareaChange}
             onKeyDown={handleKeyDown}
-            placeholder="Pregúntame algo sobre tu entrenamiento..."
+            placeholder="Pregunta sobre tu entrenamiento, pide un plan, analiza tu forma..."
             rows={1}
             disabled={isStreaming}
-            className="flex-1 bg-transparent resize-none outline-none text-sm placeholder:text-muted-foreground/60 max-h-40 disabled:opacity-50"
+            className="flex-1 bg-transparent resize-none outline-none text-sm placeholder:text-muted-foreground/50 max-h-40 disabled:opacity-50"
           />
           <button
             onClick={() => sendMessage(input)}
             disabled={!input.trim() || isStreaming}
-            className="shrink-0 rounded-lg bg-primary p-1.5 text-primary-foreground hover:bg-primary/90 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+            className="shrink-0 rounded-lg bg-orange-500 p-2 text-white hover:bg-orange-600 disabled:opacity-40 disabled:cursor-not-allowed transition-all active:scale-95"
           >
-            {isStreaming ? (
-              <Loader2 className="h-4 w-4 animate-spin" />
-            ) : (
-              <Send className="h-4 w-4" />
-            )}
+            {isStreaming
+              ? <Loader2 className="h-4 w-4 animate-spin" />
+              : <Send className="h-4 w-4" />}
           </button>
         </div>
-        <p className="text-xs text-muted-foreground/50 text-center mt-2">
+        <p className="text-xs text-muted-foreground/40 text-center">
           Enter para enviar · Shift+Enter para nueva línea
         </p>
       </div>
@@ -250,9 +334,7 @@ export function ChatInterface() {
 }
 
 function MessageBubble({
-  message,
-  isLast,
-  isStreaming,
+  message, isLast, isStreaming,
 }: {
   message: Message;
   isLast: boolean;
@@ -263,58 +345,38 @@ function MessageBubble({
 
   return (
     <div className={`flex gap-3 ${isUser ? "flex-row-reverse" : "flex-row"}`}>
-      <div
-        className={`shrink-0 rounded-full p-1.5 h-8 w-8 flex items-center justify-center ${
-          isUser ? "bg-primary text-primary-foreground" : "bg-muted"
-        }`}
-      >
+      <div className={`shrink-0 rounded-xl h-8 w-8 flex items-center justify-center text-sm font-bold ${
+        isUser ? "bg-orange-500 text-white" : "bg-muted border border-border/50"
+      }`}>
         {isUser ? <User className="h-4 w-4" /> : <Bot className="h-4 w-4" />}
       </div>
-      <div
-        className={`max-w-[80%] rounded-2xl px-4 py-2.5 text-sm leading-relaxed ${
-          isUser
-            ? "bg-primary text-primary-foreground rounded-tr-sm"
-            : "bg-muted rounded-tl-sm"
-        }`}
-      >
+
+      <div className={`max-w-[85%] rounded-2xl px-4 py-3.5 text-sm leading-relaxed ${
+        isUser
+          ? "bg-orange-500 text-white rounded-tr-sm"
+          : "bg-card border border-border/40 rounded-tl-sm"
+      }`}>
         {isEmpty ? (
           <span className="flex gap-1 items-center h-5">
             <span className="w-1.5 h-1.5 rounded-full bg-muted-foreground/60 animate-bounce [animation-delay:0ms]" />
             <span className="w-1.5 h-1.5 rounded-full bg-muted-foreground/60 animate-bounce [animation-delay:150ms]" />
             <span className="w-1.5 h-1.5 rounded-full bg-muted-foreground/60 animate-bounce [animation-delay:300ms]" />
           </span>
+        ) : isUser ? (
+          <p className="whitespace-pre-wrap">{message.content}</p>
         ) : (
-          <MarkdownText text={message.content} />
+          <div className="prose prose-sm prose-invert max-w-none
+            prose-headings:text-foreground prose-headings:font-bold prose-headings:mt-4 prose-headings:mb-2
+            prose-p:my-2 prose-p:text-foreground prose-p:leading-relaxed
+            prose-strong:text-foreground prose-strong:font-semibold
+            prose-ul:my-2 prose-ul:pl-5 prose-li:my-1 prose-li:text-foreground prose-li:leading-relaxed
+            prose-ol:my-2 prose-ol:pl-5
+            prose-code:bg-muted prose-code:px-1.5 prose-code:py-0.5 prose-code:rounded prose-code:text-orange-400 prose-code:text-xs
+            prose-hr:border-border/40 prose-hr:my-3">
+            <ReactMarkdown>{message.content}</ReactMarkdown>
+          </div>
         )}
       </div>
     </div>
-  );
-}
-
-// Renderizado básico de markdown (negrita, listas, saltos de línea)
-function MarkdownText({ text }: { text: string }) {
-  const lines = text.split("\n");
-  return (
-    <>
-      {lines.map((line, i) => {
-        const parts = line.split(/(\*\*[^*]+\*\*)/g).map((part, j) => {
-          if (part.startsWith("**") && part.endsWith("**")) {
-            return <strong key={j}>{part.slice(2, -2)}</strong>;
-          }
-          return part;
-        });
-
-        const isBullet = line.startsWith("- ") || line.startsWith("• ");
-        const content = isBullet ? parts.slice(1) : parts;
-
-        return (
-          <span key={i}>
-            {isBullet && <span className="mr-1">•</span>}
-            {content}
-            {i < lines.length - 1 && <br />}
-          </span>
-        );
-      })}
-    </>
   );
 }

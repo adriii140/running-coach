@@ -13,7 +13,7 @@ export default async function EventsPage() {
   });
 
   // Serializar para el cliente
-  const serialized = events.map((e) => ({
+  const serialized = events.map((e: typeof events[number]) => ({
     ...e,
     date: e.date.toISOString(),
     createdAt: e.createdAt.toISOString(),

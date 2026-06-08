@@ -21,7 +21,7 @@ export async function POST(req: NextRequest) {
     return new Response(JSON.stringify({ error: "Bad request" }), { status: 400 });
   }
 
-  const [brain, recentActivities] = await Promise.all([
+  const [brain, recentActivities, upcomingEvents, activeGoals] = await Promise.all([
     prisma.runningBrain.findUnique({ where: { userId: session.userId } }),
     prisma.activity.findMany({
       where: { userId: session.userId },
@@ -32,9 +32,43 @@ export async function POST(req: NextRequest) {
         distance: true, movingTime: true, totalElevation: true, averageHeartrate: true,
       },
     }),
+    prisma.sportEvent.findMany({
+      where: {
+        userId: session.userId,
+        date: { gte: new Date() },
+      },
+      orderBy: { date: "asc" },
+      take: 5,
+    }),
+    prisma.goal.findMany({
+      where: { userId: session.userId, status: "ACTIVE" },
+      take: 5,
+    }),
   ]);
 
-  const systemPrompt = buildCoachSystemPrompt({ name: session.name, brain, recentActivities });
+  const systemPrompt = buildCoachSystemPrompt({
+    name: session.name,
+    brain,
+    recentActivities,
+    upcomingEvents: upcomingEvents.map((e) => ({
+      ...e,
+      date: e.date.toISOString(),
+      distanceKm: e.distanceKm ? Number(e.distanceKm) : null,
+      elevationGain: e.elevationGain ? Number(e.elevationGain) : null,
+      price: e.price ? Number(e.price) : null,
+    })),
+    activeGoals: activeGoals.map((g) => ({
+      id: g.id,
+      name: g.name,
+      type: g.type,
+      notes: g.notes ?? null,
+      targetDate: g.targetDate?.toISOString() ?? null,
+      distanceKm: g.distanceKm ? Number(g.distanceKm) : null,
+      targetTimeSec: g.targetTimeSec ?? null,
+      status: g.status,
+    })),
+  });
+
   const fullMessages: ChatMessage[] = [{ role: "system", content: systemPrompt }, ...messages];
 
   try {

@@ -39,7 +39,7 @@ export default async function ActivitiesPage() {
     },
   });
 
-  const serialized = activities.map((a) => ({
+  const serialized = activities.map((a: typeof activities[number]) => ({
     ...a,
     startDate: a.startDate.toISOString(),
     distance: a.distance ? Number(a.distance) : null,

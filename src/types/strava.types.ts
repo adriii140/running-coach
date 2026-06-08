@@ -56,6 +56,18 @@ export interface StravaActivity {
   weighted_average_watts?: number;
   kilojoules?: number;
   device_watts?: boolean;
+  // Solo en detalle completo (GET /activities/{id})
+  best_efforts?: StravaBestEffort[];
+  pr_count?: number;
+  achievement_count?: number;
+}
+
+export interface StravaBestEffort {
+  name: string;           // "400m", "1k", "1 mile", "2 mile", "5k", "10k", "half-marathon", "marathon"
+  elapsed_time: number;   // segundos
+  distance: number;       // metros
+  pr_rank: number | null; // 1 = PR actual, null = no PR
+  start_date: string;
 }
 
 export interface StravaActivityStreams {

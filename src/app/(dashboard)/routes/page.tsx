@@ -1,17 +1,26 @@
 import { redirect } from "next/navigation";
 import { getSession } from "@/lib/auth/session";
-import dynamic from "next/dynamic";
-
-const RouteGeneratorMap = dynamic(
-  () => import("@/components/routes/RouteGeneratorMap").then((m) => m.RouteGeneratorMap),
-  { ssr: false, loading: () => <div className="h-[calc(100vh-10rem)] bg-muted/30 rounded-xl animate-pulse" /> }
-);
+import { RouteGeneratorMapLoader } from "@/components/routes/RouteGeneratorMapLoader";
+import { prisma } from "@/lib/db/prisma";
+export const dynamic = "force-dynamic";
 
 export default async function RoutesPage() {
   const session = await getSession();
   if (!session) redirect("/login");
 
   const hasORS = !!process.env.OPENROUTESERVICE_API_KEY;
+
+  // Última ubicación de inicio de carrera para centrar el mapa
+  const lastRun = await prisma.activity.findFirst({
+    where: {
+      userId: session.userId,
+      activityType: { in: ["RUN", "TRAIL_RUN", "VIRTUAL_RUN"] },
+      startLat: { not: null },
+      startLng: { not: null },
+    },
+    orderBy: { startDate: "desc" },
+    select: { startLat: true, startLng: true },
+  });
 
   return (
     <div className="space-y-4 h-full">
@@ -33,7 +42,10 @@ export default async function RoutesPage() {
           </a>
         )}
       </div>
-      <RouteGeneratorMap />
+      <RouteGeneratorMapLoader
+        lastRunLat={lastRun?.startLat ?? null}
+        lastRunLng={lastRun?.startLng ?? null}
+      />
     </div>
   );
 }
