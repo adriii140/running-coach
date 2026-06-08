@@ -263,42 +263,42 @@ export async function generateRoute(params: RouteGeneratorParams): Promise<Gener
     };
   }
 
-  // ── Generar 5 candidatos en paralelo con seeds distintos ──
-  // Si hay seed fijo (reproducibilidad), usar 5 seeds consecutivos desde ese
-  const baseSeed = fixedSeed ?? Math.floor(Math.random() * 40) + 1;
-  const seeds = [baseSeed, baseSeed + 7, baseSeed + 13, baseSeed + 23, baseSeed + 31].map(s => ((s - 1) % 89) + 1);
+  // ── Generar 5 candidatos en paralelo con seeds totalmente aleatorios ──
+  // Pedimos un 25% más de distancia para garantizar poder recortar al objetivo exacto
+  const overshot = Math.round(targetM * 1.25);
+  const generateSeed = () => Math.floor(Math.random() * 89) + 1;
+  const seeds = fixedSeed
+    ? [fixedSeed, fixedSeed + 17, fixedSeed + 34, fixedSeed + 51, fixedSeed + 68].map(s => ((s - 1) % 89) + 1)
+    : [generateSeed(), generateSeed(), generateSeed(), generateSeed(), generateSeed()];
 
   const candidates = await Promise.all(
     seeds.map(s =>
-      fetchCandidate(startLat, startLng, targetM, numPoints, s, profile, preference, optionsBase, apiKey)
+      fetchCandidate(startLat, startLng, overshot, numPoints, s, profile, preference, optionsBase, apiKey)
     )
   );
 
   const valid = candidates.filter((c): c is CandidateRoute => c !== null);
   if (valid.length === 0) throw new Error("ORS no pudo generar ninguna ruta. Prueba con otro punto de inicio.");
 
-  // ── Selección del mejor candidato ──
-  // 1. Filtrar por elevación si hay límite
-  // 2. De los que quedan, elegir el más cercano a la distancia objetivo
+  // ── Selección del candidato ──
+  // 1. Filtrar por elevación si hay límite (tolerancia 20m)
+  // 2. De los válidos, elegir uno AL AZAR para que cada generación sea distinta
   let pool = maxElevationGainM
-    ? valid.filter(c => c.elevationM <= maxElevationGainM + 20) // tolerancia 20m en elevación
+    ? valid.filter(c => c.elevationM <= maxElevationGainM + 20)
     : valid;
 
   if (pool.length === 0) {
-    // Ninguno cumple el límite → tomar el de menos D+ y marcar como excedido
-    pool = [...valid].sort((a, b) => a.elevationM - b.elevationM).slice(0, 1);
+    // Ninguno cumple el límite → tomar el de menos D+
+    pool = [...valid].sort((a, b) => a.elevationM - b.elevationM).slice(0, 2);
   }
 
+  // Elegir aleatoriamente entre los candidatos válidos → ruta diferente cada vez
+  const best = pool[Math.floor(Math.random() * pool.length)];
 
-  // Elegir el más cercano a la distancia objetivo (en valor absoluto)
-  const best = pool.reduce((prev, curr) =>
-    Math.abs(curr.distKm - distanceKm) < Math.abs(prev.distKm - distanceKm) ? curr : prev
-  );
-
-  // ── Recortar si excede el máximo permitido ──
+  // ── Recortar al objetivo exacto (+200m máximo de tolerancia) ──
   let geometry = best.geometry;
   if (best.distKm > maxAllowedKm) {
-    geometry = clipToDistance(geometry, maxAllowedKm);
+    geometry = clipToDistance(geometry, distanceKm); // recortar exacto al objetivo
   }
 
   // Recalcular distancia real final
