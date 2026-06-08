@@ -215,7 +215,103 @@ export async function generateRoute(params: RouteGeneratorParams): Promise<Gener
   const optionsBase: Record<string, unknown> = {};
   if (validAvoid.length > 0) optionsBase.avoid_features = validAvoid;
 
-  // ── Generar 5 candidatos en paralelo con seeds totalmente aleatorios ──
+  // ── CON ZONA: waypoints en zigzag dentro del polígono ──
+  if (boundingPolygon && boundingPolygon.length >= 3) {
+    // Calcular centroide y radio aproximado del polígono
+    const centLat = boundingPolygon.reduce((s, p) => s + p[0], 0) / boundingPolygon.length;
+    const centLng = boundingPolygon.reduce((s, p) => s + p[1], 0) / boundingPolygon.length;
+
+    // Factor de calle: las calles son ~30% más largas que línea recta
+    // Necesitamos que la suma de líneas rectas entre waypoints ≈ targetKm / 1.3
+    const streetFactor = 1.3;
+    // Con N segmentos (ida + vuelta al origen), cada segmento debe medir:
+    const numSegments = distanceKm <= 4 ? 4 : distanceKm <= 8 ? 6 : 8;
+    const segmentKm = (distanceKm / streetFactor) / numSegments;
+
+    // Generar 3 variaciones de zigzag con rotación aleatoria para dar variedad
+    const baseAngle = Math.floor(Math.random() * 360);
+    const variations = [0, 40, 80].map(offset => {
+      const angle = (baseAngle + offset) % 360;
+      const cosLat = Math.cos((startLat * Math.PI) / 180);
+      const wps: [number, number][] = [];
+
+      // Zigzag: alterna dirección principal y perpendicular
+      for (let i = 0; i < numSegments - 1; i++) {
+        const dir = i % 2 === 0 ? angle : (angle + 90) % 360;
+        const flip = Math.floor(i / 2) % 2 === 0 ? 1 : -1;
+        const rad = (dir * Math.PI) / 180;
+        const prevLat = wps.length > 0 ? wps[wps.length - 1][0] : startLat;
+        const prevLng = wps.length > 0 ? wps[wps.length - 1][1] : startLng;
+        let pLat = prevLat + flip * (segmentKm * Math.cos(rad)) / 111;
+        let pLng = prevLng + flip * (segmentKm * Math.sin(rad)) / (111 * cosLat);
+
+        // Si el punto cae fuera del polígono, invertir dirección
+        if (!isInPolygon(pLat, pLng, boundingPolygon)) {
+          pLat = prevLat - flip * (segmentKm * Math.cos(rad)) / 111;
+          pLng = prevLng - flip * (segmentKm * Math.sin(rad)) / (111 * cosLat);
+        }
+        // Si sigue fuera, usar el centroide como fallback
+        if (!isInPolygon(pLat, pLng, boundingPolygon)) {
+          pLat = centLat; pLng = centLng;
+        }
+        wps.push([pLat, pLng]);
+      }
+      return wps;
+    });
+
+    // Probar las 3 variaciones y quedarnos con la mejor (más dentro de la zona)
+    const zoneResults = await Promise.all(variations.map(async (wps) => {
+      const coordinates: [number, number][] = [
+        [startLng, startLat],
+        ...wps.map(([lt, ln]): [number, number] => [ln, lt]),
+        [startLng, startLat],
+      ];
+      const body = {
+        coordinates,
+        options: Object.keys(optionsBase).length > 0 ? optionsBase : undefined,
+        instructions: false, elevation: true, units: "km", preference,
+      };
+      try {
+        const res = await callORS(profile, body, apiKey);
+        if (!res.ok) return null;
+        const data = await res.json();
+        const feature = (data.features as unknown[])?.[0] as Record<string, unknown> | undefined;
+        if (!feature) return null;
+        const raw3d = (feature.geometry as { coordinates: [number, number, number][] }).coordinates;
+        let geometry: [number, number][] = raw3d.map(([lng2, lat2]) => [lat2, lng2]);
+        const summary = (feature.properties as { summary?: { distance: number; duration: number } })?.summary;
+        let elevationM = 0, elevationLossM = 0;
+        for (let i = 1; i < raw3d.length; i++) {
+          const diff = raw3d[i][2] - raw3d[i - 1][2];
+          if (diff > 0) elevationM += diff; else elevationLossM += Math.abs(diff);
+        }
+        const dist = calcDistKm(geometry);
+        if (dist > distanceKm + 0.2) geometry = clipToDistance(geometry, distanceKm);
+        const finalDist = Math.round(calcDistKm(geometry) * 10) / 10;
+        const insidePct = geometry.filter(([lt, ln]) => isInPolygon(lt, ln, boundingPolygon)).length / geometry.length;
+        return { geometry, distanceKm: finalDist, elevationM: Math.round(elevationM), elevationLossM: Math.round(elevationLossM),
+          durationMin: Math.round((summary?.duration ?? finalDist * 6 * 60) / 60), insidePct };
+      } catch { return null; }
+    }));
+
+    type ZoneResult = { geometry: [number,number][]; distanceKm: number; elevationM: number; elevationLossM: number; durationMin: number; insidePct: number };
+    const validZone = zoneResults.filter(Boolean) as unknown as ZoneResult[];
+    if (validZone.length > 0) {
+      // Elegir la que más puntos tiene dentro de la zona
+      const best = validZone.sort((a, b) => b.insidePct - a.insidePct)[0];
+      return {
+        geometry: best.geometry, distanceKm: best.distanceKm,
+        elevationM: best.elevationM, elevationLossM: best.elevationLossM,
+        durationMin: best.durationMin,
+        waypoints: [best.geometry[0], best.geometry[best.geometry.length - 1]],
+        steps: [],
+        elevationExceeded: maxElevationGainM !== undefined && best.elevationM > maxElevationGainM,
+      };
+    }
+    // Si falla la zona, continuar con round_trip normal como fallback
+  }
+
+  // ── SIN ZONA: 5 candidatos en paralelo con seeds totalmente aleatorios ──
   // Pedimos un 40% más de distancia → ORS explora más calles → recortamos al objetivo exacto
   const overshot = Math.round(targetM * 1.4);
   const generateSeed = () => Math.floor(Math.random() * 89) + 1;
@@ -232,31 +328,12 @@ export async function generateRoute(params: RouteGeneratorParams): Promise<Gener
   const valid = candidates.filter((c): c is CandidateRoute => c !== null);
   if (valid.length === 0) throw new Error("ORS no pudo generar ninguna ruta. Prueba con otro punto de inicio.");
 
-  // ── Selección del candidato ──
-  // 1. Si hay polígono: preferir candidatos que pasen más tiempo dentro de la zona
-  // 2. Filtrar por elevación si hay límite (tolerancia 20m)
-  // 3. De los válidos, elegir uno AL AZAR para que cada generación sea distinta
+  let pool = maxElevationGainM
+    ? valid.filter(c => c.elevationM <= maxElevationGainM + 20)
+    : [...valid];
 
-  /** Fracción de puntos de la geometría que caen dentro del polígono */
-  const zoneScore = (c: CandidateRoute): number => {
-    if (!boundingPolygon || boundingPolygon.length < 3) return 1;
-    const inside = c.geometry.filter(([lat, lng]) => isInPolygon(lat, lng, boundingPolygon)).length;
-    return inside / c.geometry.length;
-  };
-
-  // Ordenar por zona score (más dentro = mejor), luego filtrar por elevación
-  let pool = [...valid].sort((a, b) => zoneScore(b) - zoneScore(a));
-
-  // Si hay zona activa, quedarnos solo con los que tienen >50% de puntos dentro
-  if (boundingPolygon && boundingPolygon.length >= 3) {
-    const inZone = pool.filter(c => zoneScore(c) >= 0.5);
-    if (inZone.length > 0) pool = inZone;
-  }
-
-  if (maxElevationGainM) {
-    const lowElev = pool.filter(c => c.elevationM <= maxElevationGainM + 20);
-    if (lowElev.length > 0) pool = lowElev;
-    else pool = [pool.sort((a, b) => a.elevationM - b.elevationM)[0]];
+  if (pool.length === 0) {
+    pool = [...valid].sort((a, b) => a.elevationM - b.elevationM).slice(0, 2);
   }
 
   // Elegir aleatoriamente entre los candidatos válidos → ruta diferente cada vez
