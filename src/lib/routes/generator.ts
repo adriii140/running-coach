@@ -188,13 +188,9 @@ export async function generateRoute(params: RouteGeneratorParams): Promise<Gener
 
   const optionsBase: Record<string, unknown> = {};
   if (validAvoid.length > 0) optionsBase.avoid_features = validAvoid;
-  if (boundingPolygon && boundingPolygon.length >= 3) {
-    optionsBase.avoid_polygons = {
-      type: "Polygon",
-      // El avoid_polygon en ORS es para EVITAR — usamos bounding de forma invertida no es directo
-      // Por ahora omitimos y dejamos que ORS genere libremente
-    };
-  }
+  // boundingPolygon: no se pasa a ORS (round_trip no soporta bounding box nativo)
+  // La zona dibujada sirve como referencia visual pero ORS genera libremente
+  void boundingPolygon;
 
   // ── Generar 5 candidatos en paralelo con seeds distintos ──
   // Si hay seed fijo (reproducibilidad), usar 5 seeds consecutivos desde ese
@@ -218,9 +214,10 @@ export async function generateRoute(params: RouteGeneratorParams): Promise<Gener
     : valid;
 
   if (pool.length === 0) {
-    // Si ninguno cumple el límite de elevación, tomar el de menos D+
+    // Ninguno cumple el límite → tomar el de menos D+ y marcar como excedido
     pool = [...valid].sort((a, b) => a.elevationM - b.elevationM).slice(0, 1);
   }
+
 
   // Elegir el más cercano a la distancia objetivo (en valor absoluto)
   const best = pool.reduce((prev, curr) =>
