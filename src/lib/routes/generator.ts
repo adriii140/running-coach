@@ -215,57 +215,9 @@ export async function generateRoute(params: RouteGeneratorParams): Promise<Gener
   const optionsBase: Record<string, unknown> = {};
   if (validAvoid.length > 0) optionsBase.avoid_features = validAvoid;
 
-  // ── Con polígono: waypoints manuales dentro de la zona ──
-  if (boundingPolygon && boundingPolygon.length >= 3) {
-    const streetFactor = 0.72;
-    const radiusKm = (distanceKm * streetFactor) / (2 * Math.PI);
-    const angles = [0, 60, 120, 180, 240, 300]; // 6 ángulos para ruta más variada
-    const wps = angles.map(a => waypointAt(startLat, startLng, a, radiusKm, boundingPolygon));
-    // Usar 3-4 waypoints distribuidos dentro de la zona
-    const nWp = distanceKm <= 5 ? 3 : 4;
-    const step = Math.floor(angles.length / nWp);
-    const selected = Array.from({ length: nWp }, (_, i) => wps[i * step]);
-    const coordinates: [number, number][] = [
-      [startLng, startLat],
-      ...selected.map(([lt, ln]): [number, number] => [ln, lt]),
-      [startLng, startLat],
-    ];
-    const body = {
-      coordinates,
-      options: Object.keys(optionsBase).length > 0 ? optionsBase : undefined,
-      instructions: false,
-      elevation: true,
-      units: "km",
-      preference,
-    };
-    const res = await callORS(profile, body, apiKey);
-    if (!res.ok) throw new Error(`ORS error generando ruta en zona: ${res.status}`);
-    const data = await res.json();
-    const feature = (data.features as unknown[])?.[0] as Record<string, unknown> | undefined;
-    if (!feature) throw new Error("ORS no devolvió ruta para la zona dibujada.");
-    const raw3d = (feature.geometry as { coordinates: [number, number, number][] }).coordinates;
-    let geometry: [number, number][] = raw3d.map(([lng2, lat2]) => [lat2, lng2]);
-    const summary = (feature.properties as { summary?: { distance: number; duration: number } })?.summary;
-    let elevationM = 0, elevationLossM = 0;
-    for (let i = 1; i < raw3d.length; i++) {
-      const diff = raw3d[i][2] - raw3d[i - 1][2];
-      if (diff > 0) elevationM += diff; else elevationLossM += Math.abs(diff);
-    }
-    if (calcDistKm(geometry) > maxAllowedKm) geometry = clipToDistance(geometry, maxAllowedKm);
-    const finalDist = Math.round(calcDistKm(geometry) * 10) / 10;
-    return {
-      geometry, distanceKm: finalDist,
-      elevationM: Math.round(elevationM), elevationLossM: Math.round(elevationLossM),
-      durationMin: Math.round((summary?.duration ?? finalDist * 6 * 60) / 60),
-      waypoints: [geometry[0], geometry[geometry.length - 1]],
-      steps: [],
-      elevationExceeded: maxElevationGainM !== undefined && elevationM > maxElevationGainM,
-    };
-  }
-
   // ── Generar 5 candidatos en paralelo con seeds totalmente aleatorios ──
-  // Pedimos un 25% más de distancia para garantizar poder recortar al objetivo exacto
-  const overshot = Math.round(targetM * 1.25);
+  // Pedimos un 40% más de distancia → ORS explora más calles → recortamos al objetivo exacto
+  const overshot = Math.round(targetM * 1.4);
   const generateSeed = () => Math.floor(Math.random() * 89) + 1;
   const seeds = fixedSeed
     ? [fixedSeed, fixedSeed + 17, fixedSeed + 34, fixedSeed + 51, fixedSeed + 68].map(s => ((s - 1) % 89) + 1)
@@ -281,15 +233,30 @@ export async function generateRoute(params: RouteGeneratorParams): Promise<Gener
   if (valid.length === 0) throw new Error("ORS no pudo generar ninguna ruta. Prueba con otro punto de inicio.");
 
   // ── Selección del candidato ──
-  // 1. Filtrar por elevación si hay límite (tolerancia 20m)
-  // 2. De los válidos, elegir uno AL AZAR para que cada generación sea distinta
-  let pool = maxElevationGainM
-    ? valid.filter(c => c.elevationM <= maxElevationGainM + 20)
-    : valid;
+  // 1. Si hay polígono: preferir candidatos que pasen más tiempo dentro de la zona
+  // 2. Filtrar por elevación si hay límite (tolerancia 20m)
+  // 3. De los válidos, elegir uno AL AZAR para que cada generación sea distinta
 
-  if (pool.length === 0) {
-    // Ninguno cumple el límite → tomar el de menos D+
-    pool = [...valid].sort((a, b) => a.elevationM - b.elevationM).slice(0, 2);
+  /** Fracción de puntos de la geometría que caen dentro del polígono */
+  const zoneScore = (c: CandidateRoute): number => {
+    if (!boundingPolygon || boundingPolygon.length < 3) return 1;
+    const inside = c.geometry.filter(([lat, lng]) => isInPolygon(lat, lng, boundingPolygon)).length;
+    return inside / c.geometry.length;
+  };
+
+  // Ordenar por zona score (más dentro = mejor), luego filtrar por elevación
+  let pool = [...valid].sort((a, b) => zoneScore(b) - zoneScore(a));
+
+  // Si hay zona activa, quedarnos solo con los que tienen >50% de puntos dentro
+  if (boundingPolygon && boundingPolygon.length >= 3) {
+    const inZone = pool.filter(c => zoneScore(c) >= 0.5);
+    if (inZone.length > 0) pool = inZone;
+  }
+
+  if (maxElevationGainM) {
+    const lowElev = pool.filter(c => c.elevationM <= maxElevationGainM + 20);
+    if (lowElev.length > 0) pool = lowElev;
+    else pool = [pool.sort((a, b) => a.elevationM - b.elevationM)[0]];
   }
 
   // Elegir aleatoriamente entre los candidatos válidos → ruta diferente cada vez
