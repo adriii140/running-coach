@@ -88,16 +88,19 @@ export function ChatInterface() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
   const [isStreaming, setIsStreaming] = useState(false);
+  const [isLoadingHistory, setIsLoadingHistory] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [models, setModels] = useState<ModelOption[]>([]);
   const [selectedModel, setSelectedModel] = useState<string>("");
   const [showModelPicker, setShowModelPicker] = useState(false);
   const [ctx, setCtx] = useState<CoachContext | null>(null);
+  const [conversationId, setConversationId] = useState<string | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const abortRef = useRef<AbortController | null>(null);
 
   useEffect(() => {
+    // Cargar modelos y contexto en paralelo
     fetch("/api/coach/models")
       .then((r) => r.json())
       .then((data) => {
@@ -112,6 +115,19 @@ export function ChatInterface() {
       .then((r) => r.json())
       .then(setCtx)
       .catch(() => {});
+
+    // Cargar historial de la conversación activa
+    fetch("/api/coach/history")
+      .then((r) => r.json())
+      .then((data) => {
+        if (data.messages && data.messages.length > 0) {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          setMessages((data.messages as any[]).filter((m) => m.role !== "system") as Message[]);
+          setConversationId(data.conversationId ?? null);
+        }
+      })
+      .catch(() => {})
+      .finally(() => setIsLoadingHistory(false));
   }, []);
 
   useEffect(() => {
@@ -124,8 +140,7 @@ export function ChatInterface() {
       setError(null);
 
       const userMessage: Message = { role: "user", content: content.trim() };
-      const newMessages = [...messages, userMessage];
-      setMessages(newMessages);
+      setMessages((prev) => [...prev, userMessage]);
       setInput("");
       if (textareaRef.current) textareaRef.current.style.height = "auto";
 
@@ -137,9 +152,19 @@ export function ChatInterface() {
         const res = await fetch("/api/coach/chat", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ messages: newMessages, modelId: selectedModel }),
+          body: JSON.stringify({
+            message: userMessage,
+            modelId: selectedModel,
+            conversationId: conversationId,
+          }),
           signal: abortRef.current.signal,
         });
+
+        // Capturar el conversationId de la respuesta para futuras peticiones
+        const respConvId = res.headers.get("X-Conversation-Id");
+        if (respConvId && respConvId !== "new") {
+          setConversationId(respConvId);
+        }
 
         if (!res.ok) {
           const err = await res.json().catch(() => ({ error: "Error desconocido" }));
@@ -169,7 +194,7 @@ export function ChatInterface() {
         abortRef.current = null;
       }
     },
-    [messages, isStreaming, selectedModel]
+    [isStreaming, selectedModel, conversationId]
   );
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
@@ -190,6 +215,9 @@ export function ChatInterface() {
     setMessages([]);
     setError(null);
     setIsStreaming(false);
+    setConversationId(null);
+    // Borrar historial en la base de datos
+    fetch("/api/coach/history", { method: "DELETE" }).catch(() => {});
   };
 
   const suggestedQuestions = buildSuggestedQuestions(ctx);
@@ -200,8 +228,15 @@ export function ChatInterface() {
       {/* Mensajes */}
       <div className="flex-1 overflow-y-auto space-y-6 pb-4">
 
+        {/* Cargando historial */}
+        {isLoadingHistory && messages.length === 0 && (
+          <div className="flex items-center justify-center h-full">
+            <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+          </div>
+        )}
+
         {/* Estado vacío */}
-        {messages.length === 0 && (
+        {!isLoadingHistory && messages.length === 0 && (
           <div className="flex flex-col items-center justify-center h-full gap-5 text-center px-2">
             <div className="rounded-2xl bg-orange-500/10 border border-orange-500/20 p-4">
               <Bot className="h-8 w-8 text-orange-400" />
