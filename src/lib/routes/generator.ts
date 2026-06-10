@@ -215,51 +215,62 @@ export async function generateRoute(params: RouteGeneratorParams): Promise<Gener
   const optionsBase: Record<string, unknown> = {};
   if (validAvoid.length > 0) optionsBase.avoid_features = validAvoid;
 
-  // ── CON ZONA: waypoints en zigzag dentro del polígono ──
+  // ── CON ZONA: waypoints densos adaptados al tamaño del polígono ──
   if (boundingPolygon && boundingPolygon.length >= 3) {
-    // Calcular centroide y radio aproximado del polígono
     const centLat = boundingPolygon.reduce((s, p) => s + p[0], 0) / boundingPolygon.length;
     const centLng = boundingPolygon.reduce((s, p) => s + p[1], 0) / boundingPolygon.length;
 
-    // Factor de calle: las calles son ~30% más largas que línea recta
-    // Necesitamos que la suma de líneas rectas entre waypoints ≈ targetKm / 1.3
-    const streetFactor = 1.3;
-    // Con N segmentos (ida + vuelta al origen), cada segmento debe medir:
-    const numSegments = distanceKm <= 4 ? 4 : distanceKm <= 8 ? 6 : 8;
-    const segmentKm = (distanceKm / streetFactor) / numSegments;
+    // Radio máximo del polígono (distancia del centroide al vértice más lejano)
+    const maxRadius = Math.max(...boundingPolygon.map(p => distKm([centLat, centLng], p)));
 
-    // Generar 3 variaciones de zigzag con rotación aleatoria para dar variedad
+    // Segmento adaptado al polígono: máx 45% del radio para que quepan dentro
+    // Si el polígono es grande, sube el segmento ideal basado en la distancia
+    const streetFactor = 1.35;
+    const idealSegKm = (distanceKm / streetFactor) / 8;
+    const segmentKm = Math.max(0.04, Math.min(idealSegKm, maxRadius * 0.45));
+
+    // Cuántos segmentos necesitamos para cubrir la distancia pedida
+    const segmentsNeeded = Math.ceil(distanceKm / (segmentKm * streetFactor));
+    // ORS soporta hasta ~50 coordenadas: start + waypoints + end → máx 48 waypoints
+    const numWaypoints = Math.min(segmentsNeeded, 48);
+
+    // Generar 3 variaciones con ángulos distintos para dar variedad
     const baseAngle = Math.floor(Math.random() * 360);
-    const variations = [0, 40, 80].map(offset => {
+    const variations = [0, 45, 90].map(offset => {
       const angle = (baseAngle + offset) % 360;
       const cosLat = Math.cos((startLat * Math.PI) / 180);
       const wps: [number, number][] = [];
 
-      // Zigzag: alterna dirección principal y perpendicular
-      for (let i = 0; i < numSegments - 1; i++) {
-        const dir = i % 2 === 0 ? angle : (angle + 90) % 360;
-        const flip = Math.floor(i / 2) % 2 === 0 ? 1 : -1;
+      for (let i = 0; i < numWaypoints; i++) {
+        // Alterna 4 direcciones: N, E, S, W relativas al ángulo base → zigzag denso
+        const dirs = [angle, (angle + 90) % 360, (angle + 180) % 360, (angle + 270) % 360];
+        const dir = dirs[i % 4];
         const rad = (dir * Math.PI) / 180;
         const prevLat = wps.length > 0 ? wps[wps.length - 1][0] : startLat;
         const prevLng = wps.length > 0 ? wps[wps.length - 1][1] : startLng;
-        let pLat = prevLat + flip * (segmentKm * Math.cos(rad)) / 111;
-        let pLng = prevLng + flip * (segmentKm * Math.sin(rad)) / (111 * cosLat);
 
-        // Si el punto cae fuera del polígono, invertir dirección
-        if (!isInPolygon(pLat, pLng, boundingPolygon)) {
-          pLat = prevLat - flip * (segmentKm * Math.cos(rad)) / 111;
-          pLng = prevLng - flip * (segmentKm * Math.sin(rad)) / (111 * cosLat);
+        // Probar diferentes distancias hasta encontrar un punto dentro del polígono
+        let found = false;
+        for (const frac of [1.0, 0.8, 0.6, 0.4, 0.2]) {
+          const pLat = prevLat + (segmentKm * frac * Math.cos(rad)) / 111;
+          const pLng = prevLng + (segmentKm * frac * Math.sin(rad)) / (111 * cosLat);
+          if (isInPolygon(pLat, pLng, boundingPolygon)) {
+            wps.push([pLat, pLng]);
+            found = true;
+            break;
+          }
         }
-        // Si sigue fuera, usar el centroide como fallback
-        if (!isInPolygon(pLat, pLng, boundingPolygon)) {
-          pLat = centLat; pLng = centLng;
+        // Si ninguna distancia funciona, rebotar hacia el centroide
+        if (!found) {
+          const bounceLat = prevLat + ((centLat - prevLat) * 0.5);
+          const bounceLng = prevLng + ((centLng - prevLng) * 0.5);
+          wps.push([bounceLat, bounceLng]);
         }
-        wps.push([pLat, pLng]);
       }
       return wps;
     });
 
-    // Probar las 3 variaciones y quedarnos con la mejor (más dentro de la zona)
+    // Probar las 3 variaciones y quedarnos con la mejor
     const zoneResults = await Promise.all(variations.map(async (wps) => {
       const coordinates: [number, number][] = [
         [startLng, startLat],
@@ -289,16 +300,24 @@ export async function generateRoute(params: RouteGeneratorParams): Promise<Gener
         if (dist > distanceKm + 0.2) geometry = clipToDistance(geometry, distanceKm);
         const finalDist = Math.round(calcDistKm(geometry) * 10) / 10;
         const insidePct = geometry.filter(([lt, ln]) => isInPolygon(lt, ln, boundingPolygon)).length / geometry.length;
-        return { geometry, distanceKm: finalDist, elevationM: Math.round(elevationM), elevationLossM: Math.round(elevationLossM),
-          durationMin: Math.round((summary?.duration ?? finalDist * 6 * 60) / 60), insidePct };
+        return {
+          geometry, distanceKm: finalDist, elevationM: Math.round(elevationM),
+          elevationLossM: Math.round(elevationLossM),
+          durationMin: Math.round((summary?.duration ?? finalDist * 6 * 60) / 60),
+          insidePct,
+        };
       } catch { return null; }
     }));
 
     type ZoneResult = { geometry: [number,number][]; distanceKm: number; elevationM: number; elevationLossM: number; durationMin: number; insidePct: number };
     const validZone = zoneResults.filter(Boolean) as unknown as ZoneResult[];
     if (validZone.length > 0) {
-      // Elegir la que más puntos tiene dentro de la zona
-      const best = validZone.sort((a, b) => b.insidePct - a.insidePct)[0];
+      // Elegir la que más puntos tiene dentro de la zona Y más se acerca a la distancia pedida
+      const best = validZone.sort((a, b) => {
+        const scoreA = a.insidePct * 0.6 + (1 - Math.abs(a.distanceKm - distanceKm) / distanceKm) * 0.4;
+        const scoreB = b.insidePct * 0.6 + (1 - Math.abs(b.distanceKm - distanceKm) / distanceKm) * 0.4;
+        return scoreB - scoreA;
+      })[0];
       return {
         geometry: best.geometry, distanceKm: best.distanceKm,
         elevationM: best.elevationM, elevationLossM: best.elevationLossM,
