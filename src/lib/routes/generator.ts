@@ -214,6 +214,12 @@ export async function generateRoute(params: RouteGeneratorParams): Promise<Gener
 
   const optionsBase: Record<string, unknown> = {};
   if (validAvoid.length > 0) optionsBase.avoid_features = validAvoid;
+  // Cuando hay límite de desnivel, penalizar fuertemente las pendientes en ORS
+  if (maxElevationGainM !== undefined) {
+    // steepness_difficulty 3 = evitar pendientes al máximo (escala 1-3)
+    const level = maxElevationGainM <= 100 ? 3 : maxElevationGainM <= 300 ? 2 : 1;
+    optionsBase.profile_params = { weightings: { steepness_difficulty: { level } } };
+  }
 
   // ── CON ZONA: waypoints densos adaptados al tamaño del polígono ──
   if (boundingPolygon && boundingPolygon.length >= 3) {
@@ -312,8 +318,13 @@ export async function generateRoute(params: RouteGeneratorParams): Promise<Gener
     type ZoneResult = { geometry: [number,number][]; distanceKm: number; elevationM: number; elevationLossM: number; durationMin: number; insidePct: number };
     const validZone = zoneResults.filter(Boolean) as unknown as ZoneResult[];
     if (validZone.length > 0) {
-      // Elegir la que más puntos tiene dentro de la zona Y más se acerca a la distancia pedida
-      const best = validZone.sort((a, b) => {
+      // Si hay límite de desnivel, primero filtrar por él; si todos lo superan, tomar el de menor D+
+      let pool = maxElevationGainM
+        ? validZone.filter(r => r.elevationM <= maxElevationGainM)
+        : validZone;
+      if (pool.length === 0) pool = [...validZone].sort((a, b) => a.elevationM - b.elevationM).slice(0, 1);
+
+      const best = pool.sort((a, b) => {
         const scoreA = a.insidePct * 0.6 + (1 - Math.abs(a.distanceKm - distanceKm) / distanceKm) * 0.4;
         const scoreB = b.insidePct * 0.6 + (1 - Math.abs(b.distanceKm - distanceKm) / distanceKm) * 0.4;
         return scoreB - scoreA;
@@ -330,13 +341,16 @@ export async function generateRoute(params: RouteGeneratorParams): Promise<Gener
     // Si falla la zona, continuar con round_trip normal como fallback
   }
 
-  // ── SIN ZONA: 5 candidatos en paralelo con seeds totalmente aleatorios ──
+  // ── SIN ZONA: candidatos en paralelo con seeds totalmente aleatorios ──
   // Pedimos un 40% más de distancia → ORS explora más calles → recortamos al objetivo exacto
   const overshot = Math.round(targetM * 1.4);
   const generateSeed = () => Math.floor(Math.random() * 89) + 1;
+
+  // Con límite de desnivel, generamos más candidatos para tener más opciones planas
+  const numCandidates = maxElevationGainM !== undefined ? 8 : 5;
   const seeds = fixedSeed
-    ? [fixedSeed, fixedSeed + 17, fixedSeed + 34, fixedSeed + 51, fixedSeed + 68].map(s => ((s - 1) % 89) + 1)
-    : [generateSeed(), generateSeed(), generateSeed(), generateSeed(), generateSeed()];
+    ? Array.from({ length: numCandidates }, (_, i) => ((fixedSeed + i * 17 - 1) % 89) + 1)
+    : Array.from({ length: numCandidates }, generateSeed);
 
   const candidates = await Promise.all(
     seeds.map(s =>
@@ -347,12 +361,16 @@ export async function generateRoute(params: RouteGeneratorParams): Promise<Gener
   const valid = candidates.filter((c): c is CandidateRoute => c !== null);
   if (valid.length === 0) throw new Error("ORS no pudo generar ninguna ruta. Prueba con otro punto de inicio.");
 
+  // Filtrar por desnivel — si ninguna cumple, tomar la de menor D+
   let pool = maxElevationGainM
-    ? valid.filter(c => c.elevationM <= maxElevationGainM + 20)
+    ? valid.filter(c => c.elevationM <= maxElevationGainM)
     : [...valid];
 
-  if (pool.length === 0) {
-    pool = [...valid].sort((a, b) => a.elevationM - b.elevationM).slice(0, 2);
+  if (pool.length === 0 && maxElevationGainM !== undefined) {
+    // Ninguna candidata cumple: quedarse con la de menor desnivel (mejor que nada)
+    pool = [...valid].sort((a, b) => a.elevationM - b.elevationM).slice(0, 1);
+  } else if (pool.length === 0) {
+    pool = [...valid];
   }
 
   // Elegir aleatoriamente entre los candidatos válidos → ruta diferente cada vez
