@@ -214,12 +214,6 @@ export async function generateRoute(params: RouteGeneratorParams): Promise<Gener
 
   const optionsBase: Record<string, unknown> = {};
   if (validAvoid.length > 0) optionsBase.avoid_features = validAvoid;
-  // Cuando hay límite de desnivel, penalizar fuertemente las pendientes en ORS
-  if (maxElevationGainM !== undefined) {
-    // steepness_difficulty 3 = evitar pendientes al máximo (escala 1-3)
-    const level = maxElevationGainM <= 100 ? 3 : maxElevationGainM <= 300 ? 2 : 1;
-    optionsBase.profile_params = { weightings: { steepness_difficulty: { level } } };
-  }
 
   // ── CON ZONA: waypoints densos adaptados al tamaño del polígono ──
   if (boundingPolygon && boundingPolygon.length >= 3) {
