@@ -460,6 +460,7 @@ model GeneratedRoute {
 model AIConversation {
   id        String   @id @default(cuid())
   userId    String
+  title     String?
   messages  Json
   context   Json?
   provider  String?

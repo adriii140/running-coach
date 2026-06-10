@@ -33,23 +33,13 @@ export async function POST(req: NextRequest) {
 
   // Cargar historial existente de la conversación
   let history: ChatMessage[] = [];
-  let activeConversationId = conversationId;
+  let activeConversationId: string | null = conversationId === "new" ? null : conversationId;
 
-  if (conversationId && conversationId !== "new") {
+  if (activeConversationId) {
     const conv = await prisma.aIConversation.findFirst({
-      where: { id: conversationId, userId: session.userId },
+      where: { id: activeConversationId, userId: session.userId },
     });
     if (conv) history = conv.messages as unknown as ChatMessage[];
-  } else if (!conversationId) {
-    // Buscar conversación activa más reciente si no se especificó
-    const conv = await prisma.aIConversation.findFirst({
-      where: { userId: session.userId },
-      orderBy: { updatedAt: "desc" },
-    });
-    if (conv) {
-      history = conv.messages as unknown as ChatMessage[];
-      activeConversationId = conv.id;
-    }
   }
 
   // Cargar contexto del runner
@@ -166,14 +156,18 @@ async function persistHistory(
   model: string,
   onCreated?: (id: string) => void
 ) {
-  if (conversationId && conversationId !== "new") {
+  // Auto-título: primer mensaje del usuario, máx 60 caracteres
+  const firstUser = messages.find((m) => m.role === "user");
+  const autoTitle = firstUser ? firstUser.content.slice(0, 60) : null;
+
+  if (conversationId) {
     await prisma.aIConversation.update({
       where: { id: conversationId, userId },
       data: { messages: messages as never, provider, model, updatedAt: new Date() },
     });
   } else {
     const created = await prisma.aIConversation.create({
-      data: { userId, messages: messages as never, provider, model },
+      data: { userId, messages: messages as never, provider, model, title: autoTitle },
     });
     onCreated?.(created.id);
   }
