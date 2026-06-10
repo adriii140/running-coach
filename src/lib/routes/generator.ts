@@ -44,12 +44,19 @@ function calcDistKm(geometry: [number, number][]): number {
   return d;
 }
 
-/** Calcular D+ de una geometría con elevación */
-function calcElevationGain(coords: [number, number, number][]): number {
+/**
+ * Calcular D+ filtrando ruido GPS.
+ * ORS devuelve cientos de puntos con pequeñas oscilaciones de ±0.5m que se acumulan
+ * en desniveles falsos. Solo contamos cambios acumulados ≥ threshold como subida real.
+ */
+function calcElevationGain(coords: [number, number, number][], threshold = 2): number {
   let gain = 0;
+  let pending = 0;
   for (let i = 1; i < coords.length; i++) {
     const diff = coords[i][2] - coords[i - 1][2];
-    if (diff > 0) gain += diff;
+    pending += diff;
+    if (pending >= threshold) { gain += pending; pending = 0; }
+    else if (pending < 0) pending = 0; // bajada real: resetear acumulador
   }
   return gain;
 }
@@ -165,11 +172,10 @@ async function fetchCandidate(
     let elevationM = 0;
     let elevationLossM = 0;
     if (raw3d.length > 1 && raw3d[0].length >= 3) {
-      for (let i = 1; i < raw3d.length; i++) {
-        const diff = raw3d[i][2] - raw3d[i - 1][2];
-        if (diff > 0) elevationM += diff;
-        else elevationLossM += Math.abs(diff);
-      }
+      elevationM = calcElevationGain(raw3d);
+      // D- = invertir la señal y usar el mismo filtro
+      const inverted = raw3d.map(([x, y, z]): [number, number, number] => [x, y, -z]);
+      elevationLossM = calcElevationGain(inverted);
     }
 
     return {
@@ -214,6 +220,9 @@ export async function generateRoute(params: RouteGeneratorParams): Promise<Gener
 
   const optionsBase: Record<string, unknown> = {};
   if (validAvoid.length > 0) optionsBase.avoid_features = validAvoid;
+
+  // Con límite de desnivel, usar "shortest" para que ORS prefiera rutas directas/planas
+  const effectivePreference = maxElevationGainM !== undefined ? "shortest" : preference;
 
   // ── CON ZONA: waypoints densos adaptados al tamaño del polígono ──
   if (boundingPolygon && boundingPolygon.length >= 3) {
@@ -280,7 +289,7 @@ export async function generateRoute(params: RouteGeneratorParams): Promise<Gener
       const body = {
         coordinates,
         options: Object.keys(optionsBase).length > 0 ? optionsBase : undefined,
-        instructions: false, elevation: true, units: "km", preference,
+        instructions: false, elevation: true, units: "km", preference: effectivePreference,
       };
       try {
         const res = await callORS(profile, body, apiKey);
@@ -291,11 +300,9 @@ export async function generateRoute(params: RouteGeneratorParams): Promise<Gener
         const raw3d = (feature.geometry as { coordinates: [number, number, number][] }).coordinates;
         let geometry: [number, number][] = raw3d.map(([lng2, lat2]) => [lat2, lng2]);
         const summary = (feature.properties as { summary?: { distance: number; duration: number } })?.summary;
-        let elevationM = 0, elevationLossM = 0;
-        for (let i = 1; i < raw3d.length; i++) {
-          const diff = raw3d[i][2] - raw3d[i - 1][2];
-          if (diff > 0) elevationM += diff; else elevationLossM += Math.abs(diff);
-        }
+        const elevationM = calcElevationGain(raw3d);
+        const inverted3d = raw3d.map(([x, y, z]): [number, number, number] => [x, y, -z]);
+        const elevationLossM = calcElevationGain(inverted3d);
         const dist = calcDistKm(geometry);
         if (dist > distanceKm + 0.2) geometry = clipToDistance(geometry, distanceKm);
         const finalDist = Math.round(calcDistKm(geometry) * 10) / 10;
@@ -348,7 +355,7 @@ export async function generateRoute(params: RouteGeneratorParams): Promise<Gener
 
   const candidates = await Promise.all(
     seeds.map(s =>
-      fetchCandidate(startLat, startLng, overshot, numPoints, s, profile, preference, optionsBase, apiKey)
+      fetchCandidate(startLat, startLng, overshot, numPoints, s, profile, effectivePreference, optionsBase, apiKey)
     )
   );
 
