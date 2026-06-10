@@ -7,7 +7,25 @@ import {
   PenLine, Trash2, ChevronDown, ChevronUp,
   AlertTriangle, ArrowDown, Map, Bookmark, Check,
   CornerDownLeft, CornerDownRight, MoveRight, RotateCw, Download,
+  Sparkles, Zap, Timer, Activity,
 } from "lucide-react";
+
+interface AIRouteParams {
+  distanceKm: number;
+  maxElevationM: number;
+  sessionType: "recovery" | "easy" | "tempo" | "intervals" | "long";
+  intensity: string;
+  targetPaceMinKm: string;
+  reasoning: string;
+}
+
+const SESSION_TYPE_LABELS: Record<string, { label: string; color: string }> = {
+  recovery: { label: "Recuperación", color: "text-blue-400" },
+  easy:     { label: "Rodaje fácil", color: "text-green-400" },
+  tempo:    { label: "Tempo / umbral", color: "text-orange-400" },
+  intervals:{ label: "Series", color: "text-red-400" },
+  long:     { label: "Tirada larga", color: "text-purple-400" },
+};
 
 interface NominatimResult {
   place_id: number;
@@ -158,6 +176,11 @@ export function RouteGeneratorMap({ lastRunLat, lastRunLng }: RouteGeneratorMapP
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const [tracking, setTracking] = useState(false);
+
+  // Modo IA
+  const [aiMode, setAiMode] = useState(false);
+  const [aiParams, setAiParams] = useState<AIRouteParams | null>(null);
+  const [loadingAiParams, setLoadingAiParams] = useState(false);
 
   // Zone drawing state
   const [drawingZone, setDrawingZone] = useState(false);
@@ -519,6 +542,55 @@ export function RouteGeneratorMap({ lastRunLat, lastRunLng }: RouteGeneratorMapP
     markerRef.current = L.marker([lat, lng], { icon }).addTo(map as unknown as import("leaflet").Map);
   }, []);
 
+  // ---------- Generate with AI ----------
+  const generateWithAI = useCallback(async () => {
+    if (!startPoint) return;
+    setLoading(true);
+    setLoadingAiParams(true);
+    setError(null);
+    setRoute(null);
+    setAiRecommendation(null);
+    setSaved(false);
+    setAiParams(null);
+
+    try {
+      // 1. Pedir parámetros a la IA
+      const paramsRes = await fetch("/api/routes/ai-params", { method: "POST" });
+      if (!paramsRes.ok) throw new Error("No se pudo consultar al coach IA");
+      const params: AIRouteParams = await paramsRes.json();
+      setAiParams(params);
+      setLoadingAiParams(false);
+
+      // 2. Generar ruta con los parámetros de la IA
+      const res = await fetch("/api/routes/generate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          lat: startPoint.lat,
+          lng: startPoint.lng,
+          distanceKm: params.distanceKm,
+          preference: ["tempo", "intervals"].includes(params.sessionType) ? "shortest" : "recommended",
+          avoidFeatures: [],
+          maxElevationGainM: params.maxElevationM,
+          boundingPolygon: zoneActive && zoneVerticesRef.current.length >= 3
+            ? zoneVerticesRef.current
+            : undefined,
+          askAI: false,
+        }),
+      });
+
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error ?? "Error generando ruta");
+      setRoute(data.route);
+      setAiRecommendation(params.reasoning);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Error desconocido");
+      setLoadingAiParams(false);
+    } finally {
+      setLoading(false);
+    }
+  }, [startPoint, zoneActive]);
+
   // ---------- Generate route ----------
   const generate = useCallback(async () => {
     if (!startPoint) return;
@@ -862,8 +934,82 @@ ${trkpts}
           )}
         </Section>
 
-        {/* 3. Distancia */}
-        <Section title="Distancia" icon={<TrendingUp className="h-4 w-4 text-orange-400" />}>
+        {/* Toggle modo IA / Manual */}
+        <div className="rounded-xl border border-border/50 bg-card/40 overflow-hidden">
+          <div className="flex">
+            <button
+              onClick={() => setAiMode(false)}
+              className={`flex-1 flex items-center justify-center gap-1.5 py-2.5 text-sm font-medium transition-colors ${
+                !aiMode ? "bg-orange-500 text-white" : "text-muted-foreground hover:bg-muted/40"
+              }`}
+            >
+              <Activity className="h-3.5 w-3.5" />
+              Manual
+            </button>
+            <button
+              onClick={() => setAiMode(true)}
+              className={`flex-1 flex items-center justify-center gap-1.5 py-2.5 text-sm font-medium transition-colors ${
+                aiMode ? "bg-orange-500 text-white" : "text-muted-foreground hover:bg-muted/40"
+              }`}
+            >
+              <Sparkles className="h-3.5 w-3.5" />
+              Coach IA
+            </button>
+          </div>
+        </div>
+
+        {/* Modo IA: info de lo que hará */}
+        {aiMode && !aiParams && (
+          <div className="rounded-xl border border-orange-500/20 bg-orange-500/5 p-4 space-y-2">
+            <div className="flex items-center gap-2 text-sm font-semibold text-orange-400">
+              <Bot className="h-4 w-4" />
+              El coach decide por ti
+            </div>
+            <p className="text-xs text-muted-foreground leading-relaxed">
+              Analizará tu TSB, actividades recientes, próximas carreras y objetivos para elegir
+              automáticamente distancia, desnivel y tipo de sesión de hoy.
+            </p>
+            <p className="text-xs text-muted-foreground">
+              Solo dibuja una zona (opcional) y pulsa <strong className="text-foreground">Generar con IA</strong>.
+            </p>
+          </div>
+        )}
+
+        {/* Parámetros que decidió la IA */}
+        {aiMode && aiParams && (
+          <div className="rounded-xl border border-orange-500/30 bg-orange-500/5 p-4 space-y-3">
+            <div className="flex items-center gap-2 text-sm font-semibold text-orange-400">
+              <Sparkles className="h-4 w-4" />
+              Sesión de hoy — según tu estado
+            </div>
+            <div className="grid grid-cols-3 gap-2 text-center">
+              <div className="rounded-lg bg-background/40 py-2 px-1">
+                <p className="text-base font-bold">{aiParams.distanceKm}</p>
+                <p className="text-[10px] text-muted-foreground">km</p>
+              </div>
+              <div className="rounded-lg bg-background/40 py-2 px-1">
+                <p className="text-base font-bold">↑{aiParams.maxElevationM}</p>
+                <p className="text-[10px] text-muted-foreground">m D+</p>
+              </div>
+              <div className="rounded-lg bg-background/40 py-2 px-1">
+                <p className="text-base font-bold">{aiParams.intensity}</p>
+                <p className="text-[10px] text-muted-foreground">zona</p>
+              </div>
+            </div>
+            <div className="flex items-center justify-between text-xs">
+              <span className={`font-medium ${SESSION_TYPE_LABELS[aiParams.sessionType]?.color ?? "text-orange-400"}`}>
+                {SESSION_TYPE_LABELS[aiParams.sessionType]?.label ?? aiParams.sessionType}
+              </span>
+              <span className="flex items-center gap-1 text-muted-foreground">
+                <Timer className="h-3 w-3" />
+                {aiParams.targetPaceMinKm} min/km
+              </span>
+            </div>
+          </div>
+        )}
+
+        {/* 3. Distancia — solo en modo manual */}
+        {!aiMode && <Section title="Distancia" icon={<TrendingUp className="h-4 w-4 text-orange-400" />}>
           <div className="space-y-2">
             <div className="flex items-center justify-between">
               <span className="text-xs text-muted-foreground">Objetivo</span>
@@ -887,10 +1033,10 @@ ${trkpts}
               ))}
             </div>
           </div>
-        </Section>
+        </Section>}
 
-        {/* 4. Desnivel */}
-        <Section title="Desnivel" icon={<Mountain className="h-4 w-4 text-orange-400" />}>
+        {/* 4. Desnivel — solo en modo manual */}
+        {!aiMode && <Section title="Desnivel" icon={<Mountain className="h-4 w-4 text-orange-400" />}>
           <label className="flex items-center gap-2 cursor-pointer">
             <input
               type="checkbox"
@@ -931,11 +1077,10 @@ ${trkpts}
           {!limitElevation && (
             <p className="text-xs text-muted-foreground">Sin límite — usa la zona para controlar el área.</p>
           )}
-        </Section>
+        </Section>}
 
-
-        {/* 6. Avanzado */}
-        <Section title="Opciones avanzadas" icon={<ChevronDown className="h-4 w-4 text-muted-foreground" />} defaultOpen={false}>
+        {/* 6. Avanzado — solo en modo manual */}
+        {!aiMode && <Section title="Opciones avanzadas" icon={<ChevronDown className="h-4 w-4 text-muted-foreground" />} defaultOpen={false}>
           <div className="space-y-2">
             <label className="text-xs text-muted-foreground">Preferencia de ruta</label>
             <div className="grid grid-cols-2 gap-2">
@@ -971,18 +1116,32 @@ ${trkpts}
               </label>
             ))}
           </div>
-        </Section>
+        </Section>}
 
         {/* Botón generar */}
-        <button
-          onClick={generate}
-          disabled={!startPoint || loading || drawingZone}
-          className="w-full py-3 rounded-xl bg-orange-500 hover:bg-orange-600 text-white font-semibold text-sm disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center justify-center gap-2"
-        >
-          {loading
-            ? <><Loader2 className="h-4 w-4 animate-spin" /> Generando ruta...</>
-            : <><TrendingUp className="h-4 w-4" /> Generar ruta</>}
-        </button>
+        {aiMode ? (
+          <button
+            onClick={generateWithAI}
+            disabled={!startPoint || loading || drawingZone}
+            className="w-full py-3 rounded-xl bg-orange-500 hover:bg-orange-600 text-white font-semibold text-sm disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center justify-center gap-2"
+          >
+            {loadingAiParams
+              ? <><Loader2 className="h-4 w-4 animate-spin" /> Consultando coach IA...</>
+              : loading
+              ? <><Loader2 className="h-4 w-4 animate-spin" /> Generando ruta...</>
+              : <><Sparkles className="h-4 w-4" /> Generar con IA</>}
+          </button>
+        ) : (
+          <button
+            onClick={generate}
+            disabled={!startPoint || loading || drawingZone}
+            className="w-full py-3 rounded-xl bg-orange-500 hover:bg-orange-600 text-white font-semibold text-sm disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center justify-center gap-2"
+          >
+            {loading
+              ? <><Loader2 className="h-4 w-4 animate-spin" /> Generando ruta...</>
+              : <><TrendingUp className="h-4 w-4" /> Generar ruta</>}
+          </button>
+        )}
 
         {drawingZone && (
           <p className="text-xs text-center text-blue-400">
@@ -1088,10 +1247,10 @@ ${trkpts}
 
         {/* Coach AI */}
         {aiRecommendation && (
-          <div className="rounded-xl border border-primary/20 bg-primary/5 p-4 space-y-2">
-            <div className="flex items-center gap-2 text-sm font-semibold">
-              <Bot className="h-4 w-4 text-primary" />
-              Coach AI dice:
+          <div className="rounded-xl border border-orange-500/20 bg-orange-500/5 p-4 space-y-2">
+            <div className="flex items-center gap-2 text-sm font-semibold text-orange-400">
+              <Bot className="h-4 w-4" />
+              {aiMode ? "Por qué esta sesión" : "Coach AI dice:"}
             </div>
             <p className="text-xs text-muted-foreground leading-relaxed">{aiRecommendation}</p>
           </div>
