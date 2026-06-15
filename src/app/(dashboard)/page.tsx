@@ -4,6 +4,7 @@ import { WeeklySummary } from "@/components/dashboard/WeeklySummary";
 import { BrainStats } from "@/components/dashboard/BrainStats";
 import { RecentActivities } from "@/components/dashboard/RecentActivities";
 import { SyncButton } from "@/components/dashboard/SyncButton";
+import { TodaySession } from "@/components/dashboard/TodaySession";
 import { startOfWeek } from "date-fns";
 
 export default async function DashboardPage() {
@@ -46,7 +47,10 @@ export default async function DashboardPage() {
   const userId = session.userId;
   const weekStart = startOfWeek(new Date(), { weekStartsOn: 1 });
 
-  const [weeklyActivities, recentActivities, brain] = await Promise.all([
+  const todayStart = new Date(); todayStart.setHours(0,0,0,0);
+  const todayEnd = new Date(); todayEnd.setHours(23,59,59,999);
+
+  const [weeklyActivities, recentActivities, brain, todayPlanned] = await Promise.all([
     prisma.activity.findMany({
       where: { userId, startDate: { gte: weekStart } },
       select: { distance: true, movingTime: true, totalElevation: true, activityType: true },
@@ -62,6 +66,13 @@ export default async function DashboardPage() {
       },
     }),
     prisma.runningBrain.findUnique({ where: { userId } }),
+    prisma.plannedSession.findFirst({
+      where: {
+        plan: { userId, status: "ACTIVE" },
+        date: { gte: todayStart, lte: todayEnd },
+      },
+      include: { plan: { select: { name: true } } },
+    }),
   ]);
 
   const hour = new Date().getHours();
@@ -82,6 +93,23 @@ export default async function DashboardPage() {
         </div>
         <SyncButton />
       </div>
+
+      {todayPlanned && (
+        <TodaySession
+          session={{
+            id: todayPlanned.id,
+            type: todayPlanned.type,
+            distanceKm: todayPlanned.distanceKm ? Number(todayPlanned.distanceKm) : null,
+            durationMin: todayPlanned.durationMin,
+            elevationM: todayPlanned.elevationM,
+            zone: todayPlanned.zone,
+            description: todayPlanned.description ?? null,
+            completed: todayPlanned.completed,
+            skipped: todayPlanned.skipped,
+            planName: (todayPlanned as never as { plan: { name: string } }).plan.name,
+          }}
+        />
+      )}
 
       <section>
         <h2 className="text-sm font-medium text-muted-foreground mb-3 uppercase tracking-wide">

@@ -24,16 +24,37 @@ interface ActiveGoal {
   status: string;
 }
 
+interface PlannedSessionSummary {
+  type: string;
+  date: string;
+  distanceKm: number | null;
+  durationMin: number | null;
+  zone: string | null;
+  description: string | null;
+  completed: boolean;
+  weekNumber: number;
+}
+
+interface ActivePlanSummary {
+  name: string;
+  totalWeeks: number;
+  currentWeek: number;
+  completedSessions: number;
+  totalSessions: number;
+  upcomingSessions: PlannedSessionSummary[]; // next 7 days
+}
+
 interface CoachContext {
   name: string;
   brain: RunningBrain | null;
   recentActivities: Pick<Activity, "name" | "activityType" | "startDate" | "distance" | "movingTime" | "totalElevation" | "averageHeartrate">[];
   upcomingEvents?: UpcomingEvent[];
   activeGoals?: ActiveGoal[];
+  activePlan?: ActivePlanSummary | null;
 }
 
 export function buildCoachSystemPrompt(ctx: CoachContext): string {
-  const { name, brain, recentActivities, upcomingEvents = [], activeGoals = [] } = ctx;
+  const { name, brain, recentActivities, upcomingEvents = [], activeGoals = [], activePlan } = ctx;
   const today = new Date();
 
   // ── Running Brain ──────────────────────────────────────────────────────────
@@ -86,6 +107,20 @@ ${activeGoals.map((g) => {
     return `- **${g.name}** (${g.type})${detail}${deadline}${g.notes ? `: ${g.notes}` : ""}`;
   }).join("\n")}` : "";
 
+  // ── Plan de entrenamiento activo ──────────────────────────────────────────
+  const planSection = activePlan ? `
+## Plan de entrenamiento activo: "${activePlan.name}"
+- Semana ${activePlan.currentWeek} de ${activePlan.totalWeeks}
+- Progreso: ${activePlan.completedSessions}/${activePlan.totalSessions} sesiones completadas
+
+**Próximas sesiones (7 días):**
+${activePlan.upcomingSessions.map(s => {
+  const date = new Date(s.date).toLocaleDateString("es-ES", { weekday: "short", day: "numeric", month: "short" });
+  const done = s.completed ? " ✅" : "";
+  const detail = [s.distanceKm && `${s.distanceKm}km`, s.durationMin && `${s.durationMin}min`, s.zone].filter(Boolean).join(" · ");
+  return `- ${date}: **${s.type}**${detail ? ` (${detail})` : ""}${done}${s.description ? `\n  _${s.description}_` : ""}`;
+}).join("\n")}` : "";
+
   // ── Actividades recientes ──────────────────────────────────────────────────
   const activitiesSection = recentActivities.length > 0 ? `
 ## Últimas actividades (${Math.min(recentActivities.length, 15)})
@@ -122,6 +157,7 @@ Tu misión: analizar los datos reales del atleta y dar consejos CONCRETOS, PERSO
 - Responde en markdown: usa **negrita**, listas con guiones y encabezados con ##
 ${urgency ? `\n${urgency}\n` : ""}
 ${brainSection}
+${planSection}
 ${eventsSection}
 ${goalsSection}
 ${activitiesSection}

@@ -1,9 +1,9 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import dynamic from "next/dynamic";
 import {
-  MapPin, Clock, TrendingUp, Heart, ChevronDown, ChevronUp, X
+  MapPin, Clock, TrendingUp, Heart, ChevronDown, ChevronUp, X, Search, Filter,
 } from "lucide-react";
 
 const ActivityMap = dynamic(
@@ -159,15 +159,89 @@ function MapModal({ activity, onClose }: { activity: Activity; onClose: () => vo
   );
 }
 
+const ACTIVITY_TYPE_LABELS: Record<string, string> = {
+  RUN: "Carrera", TRAIL_RUN: "Trail", VIRTUAL_RUN: "Virtual",
+  CYCLING: "Ciclismo", WALKING: "Caminar", STRENGTH: "Fuerza", OTHER: "Otro",
+};
+
 export function ActivitiesWithMap({ activities }: Props) {
   const [selected, setSelected] = useState<Activity | null>(null);
   const [showAll, setShowAll] = useState(false);
+  const [search, setSearch] = useState("");
+  const [typeFilter, setTypeFilter] = useState<string>("all");
+  const [showFilters, setShowFilters] = useState(false);
 
-  const visible = showAll ? activities : activities.slice(0, 20);
+  // Unique activity types present in data
+  const types = useMemo(() => {
+    const set = new Set(activities.map(a => a.activityType));
+    return Array.from(set);
+  }, [activities]);
+
+  // Filtered list
+  const filtered = useMemo(() => {
+    return activities.filter(a => {
+      if (typeFilter !== "all" && a.activityType !== typeFilter) return false;
+      if (search && !a.name.toLowerCase().includes(search.toLowerCase())) return false;
+      return true;
+    });
+  }, [activities, typeFilter, search]);
+
+  const visible = showAll ? filtered : filtered.slice(0, 20);
 
   return (
     <>
       {selected && <MapModal activity={selected} onClose={() => setSelected(null)} />}
+
+      {/* Search + filter bar */}
+      <div className="mb-3 space-y-2">
+        <div className="flex gap-2">
+          <div className="relative flex-1">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+            <input
+              type="text"
+              placeholder="Buscar actividad..."
+              value={search}
+              onChange={e => setSearch(e.target.value)}
+              className="w-full rounded-xl border border-border bg-background pl-9 pr-3 py-2 text-sm"
+            />
+          </div>
+          <button
+            onClick={() => setShowFilters(v => !v)}
+            className={`flex items-center gap-1.5 rounded-xl border px-3 py-2 text-sm transition-colors ${
+              typeFilter !== "all" ? "border-primary bg-primary/10 text-primary" : "border-border bg-background text-muted-foreground hover:bg-muted"
+            }`}
+          >
+            <Filter className="h-4 w-4" />
+            {typeFilter === "all" ? "Tipo" : (ACTIVITY_TYPE_LABELS[typeFilter] ?? typeFilter)}
+          </button>
+        </div>
+
+        {showFilters && (
+          <div className="flex flex-wrap gap-1.5">
+            <button
+              onClick={() => { setTypeFilter("all"); setShowFilters(false); }}
+              className={`rounded-lg px-3 py-1.5 text-xs font-medium ${typeFilter === "all" ? "bg-primary text-primary-foreground" : "border border-border bg-background hover:bg-muted"}`}
+            >
+              Todos
+            </button>
+            {types.map(t => (
+              <button
+                key={t}
+                onClick={() => { setTypeFilter(t); setShowFilters(false); }}
+                className={`rounded-lg px-3 py-1.5 text-xs font-medium ${typeFilter === t ? "bg-primary text-primary-foreground" : "border border-border bg-background hover:bg-muted"}`}
+              >
+                {ACTIVITY_TYPE_LABELS[t] ?? t}
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {filtered.length === 0 && (
+        <div className="py-12 text-center text-sm text-muted-foreground">
+          Sin actividades{typeFilter !== "all" || search ? " con ese filtro" : ""}
+        </div>
+      )}
 
       <div className="space-y-2">
         {visible.map((a) => (
@@ -175,7 +249,7 @@ export function ActivitiesWithMap({ activities }: Props) {
         ))}
       </div>
 
-      {activities.length > 20 && (
+      {filtered.length > 20 && (
         <button
           onClick={() => setShowAll((v) => !v)}
           className="w-full flex items-center justify-center gap-2 py-2 text-sm text-muted-foreground hover:text-foreground transition-colors"
@@ -183,7 +257,7 @@ export function ActivitiesWithMap({ activities }: Props) {
           {showAll ? (
             <><ChevronUp className="h-4 w-4" /> Mostrar menos</>
           ) : (
-            <><ChevronDown className="h-4 w-4" /> Ver las {activities.length - 20} actividades restantes</>
+            <><ChevronDown className="h-4 w-4" /> Ver las {filtered.length - 20} actividades restantes</>
           )}
         </button>
       )}

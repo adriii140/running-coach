@@ -9,8 +9,8 @@ export async function PATCH(req: NextRequest) {
   const session = await getSessionFromRequest(req);
   if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
-  const { sessionId, action, activityId } = await req.json();
-  // action: "complete" | "skip" | "reset"
+  const { sessionId, action, activityId, notes } = await req.json();
+  // action: "complete" | "skip" | "reset" | "notes"
 
   // Verificar que la sesión pertenece al usuario
   const plannedSession = await prisma.plannedSession.findFirst({
@@ -21,6 +21,7 @@ export async function PATCH(req: NextRequest) {
   const data =
     action === "complete" ? { completed: true, skipped: false, activityId: activityId ?? null }
     : action === "skip"   ? { skipped: true, completed: false }
+    : action === "notes"  ? { notes: notes ?? null }
     :                       { completed: false, skipped: false, activityId: null };
 
   const updated = await prisma.plannedSession.update({

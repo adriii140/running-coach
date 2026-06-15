@@ -43,7 +43,8 @@ export async function POST(req: NextRequest) {
   }
 
   // Cargar contexto del runner
-  const [brain, recentActivities, upcomingEvents, activeGoals] = await Promise.all([
+  const nextWeek = new Date(Date.now() + 7 * 24 * 3600 * 1000);
+  const [brain, recentActivities, upcomingEvents, activeGoals, activePlanRaw] = await Promise.all([
     prisma.runningBrain.findUnique({ where: { userId: session.userId } }),
     prisma.activity.findMany({
       where: { userId: session.userId },
@@ -63,7 +64,45 @@ export async function POST(req: NextRequest) {
       where: { userId: session.userId, status: "ACTIVE" },
       take: 5,
     }),
+    prisma.trainingPlan.findFirst({
+      where: { userId: session.userId, status: "ACTIVE" },
+      include: {
+        sessions: {
+          where: { date: { gte: new Date(), lte: nextWeek } },
+          orderBy: { date: "asc" },
+          take: 7,
+        },
+        _count: { select: { sessions: true } },
+      },
+    }),
   ]);
+
+  // Build active plan summary for the coach
+  let activePlan = null;
+  if (activePlanRaw) {
+    const start = new Date(activePlanRaw.startDate);
+    const now = new Date();
+    const currentWeek = Math.max(1, Math.floor((now.getTime() - start.getTime()) / (7 * 24 * 3600 * 1000)) + 1);
+    const totalWeeks = Math.max(1, Math.ceil((new Date(activePlanRaw.endDate).getTime() - start.getTime()) / (7 * 24 * 3600 * 1000)));
+    const completedSessions = await prisma.plannedSession.count({ where: { planId: activePlanRaw.id, completed: true } });
+    activePlan = {
+      name: activePlanRaw.name,
+      totalWeeks,
+      currentWeek,
+      completedSessions,
+      totalSessions: activePlanRaw._count.sessions,
+      upcomingSessions: activePlanRaw.sessions.map(s => ({
+        type: s.type,
+        date: s.date.toISOString(),
+        distanceKm: s.distanceKm ? Number(s.distanceKm) : null,
+        durationMin: s.durationMin,
+        zone: s.zone,
+        description: s.description ?? null,
+        completed: s.completed,
+        weekNumber: s.weekNumber,
+      })),
+    };
+  }
 
   const systemPrompt = buildCoachSystemPrompt({
     name: session.name,
@@ -82,6 +121,7 @@ export async function POST(req: NextRequest) {
       distanceKm: g.distanceKm ? Number(g.distanceKm) : null,
       targetTimeSec: g.targetTimeSec ?? null, status: g.status,
     })),
+    activePlan,
   });
 
   // Historial completo: sistema + historial previo + nuevo mensaje
