@@ -29,7 +29,6 @@ const navItems = [
   { href: "/coach", label: "Coach AI", icon: Bot },
   { href: "/progress", label: "Progreso", icon: TrendingUp },
   { href: "/routes", label: "Rutas", icon: Map },
-  { href: "/goals", label: "Objetivos", icon: Target },
   { href: "/events", label: "Carreras", icon: Calendar },
   { href: "/training", label: "Plan de entreno", icon: ClipboardList },
   { href: "/strength", label: "Fuerza", icon: Dumbbell },

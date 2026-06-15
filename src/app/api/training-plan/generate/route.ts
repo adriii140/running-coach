@@ -74,7 +74,7 @@ export async function POST(req: NextRequest) {
   }
 
   // Modo IA: generar el plan
-  const [brain, recentActivities, upcomingEvents] = await Promise.all([
+  const [brain, recentActivities, allUpcomingRaces, targetEvent] = await Promise.all([
     prisma.runningBrain.findUnique({ where: { userId: session.userId } }),
     prisma.activity.findMany({
       where: { userId: session.userId },
@@ -82,36 +82,51 @@ export async function POST(req: NextRequest) {
       take: 20,
       select: { distance: true, movingTime: true, totalElevation: true, startDate: true, activityType: true },
     }),
-    sportEventId
-      ? prisma.sportEvent.findUnique({ where: { id: sportEventId } })
-      : null,
+    // Todas las carreras futuras ordenadas por fecha
+    prisma.sportEvent.findMany({
+      where: { userId: session.userId, date: { gte: start } },
+      orderBy: { date: "asc" },
+      select: { id: true, name: true, date: true, distanceKm: true, priority: true },
+    }),
+    sportEventId ? prisma.sportEvent.findUnique({ where: { id: sportEventId } }) : null,
   ]);
 
-  // Calcular semanas hasta la carrera
-  const raceDate = upcomingEvents ? new Date(upcomingEvents.date) : null;
+  // Carrera principal: la seleccionada o la próxima primaria/secundaria
+  const primaryRace = targetEvent ?? allUpcomingRaces.find(e => e.priority === "PRIMARY") ?? allUpcomingRaces[0] ?? null;
+  const raceDate = primaryRace ? new Date(primaryRace.date) : null;
   const weeksToRace = raceDate
     ? Math.max(4, Math.floor((raceDate.getTime() - start.getTime()) / (7 * 24 * 3600 * 1000)))
     : 12;
 
-  const raceName = upcomingEvents?.name ?? "sin carrera objetivo";
-  const raceDistance = upcomingEvents?.distanceKm ? Number(upcomingEvents.distanceKm) : null;
+  const raceName = primaryRace?.name ?? "sin carrera objetivo";
+  const raceDistance = primaryRace?.distanceKm ? Number(primaryRace.distanceKm) : null;
   const avgWeeklyKm = currentWeeklyKm ?? (
     recentActivities
       .filter(a => new Date(a.startDate) > new Date(Date.now() - 28 * 24 * 3600 * 1000))
       .reduce((s, a) => s + (a.distance ? Number(a.distance) / 1000 : 0), 0) / 4
   );
 
+  // Resumen de todas las carreras para el prompt
+  const racesSection = allUpcomingRaces.length > 0
+    ? `\nCARRERAS EN CALENDARIO:\n${allUpcomingRaces.map(e => {
+        const w = Math.floor((new Date(e.date).getTime() - start.getTime()) / (7 * 24 * 3600 * 1000));
+        return `  - ${e.name}${e.distanceKm ? ` (${e.distanceKm}km)` : ""} — ${new Date(e.date).toLocaleDateString("es-ES")} (semana ${w} del plan)${e.priority === "PRIMARY" ? " ⭐ PRINCIPAL" : ""}`;
+      }).join("\n")}`
+    : "";
+
   const prompt = `Eres un coach de running experto. Genera un plan de entrenamiento personalizado en JSON.
 
 DATOS DEL CORREDOR:
 - CTL actual: ${brain?.ctl?.toFixed(1) ?? "sin datos"}
 - VO2max estimado: ${brain?.vo2max?.toFixed(1) ?? "sin datos"}
+- Ritmo umbral: ${brain?.paceThresholdSec ? `${Math.floor(brain.paceThresholdSec/60)}:${String(Math.round(brain.paceThresholdSec%60)).padStart(2,"0")} /km` : "sin datos"}
 - Media km/semana últimas 4 sem: ${avgWeeklyKm.toFixed(1)} km
 - Días disponibles por semana: ${daysPerWeek}
-- Objetivo: ${raceName}${raceDistance ? ` (${raceDistance} km)` : ""}
+- Carrera objetivo principal: ${raceName}${raceDistance ? ` (${raceDistance} km)` : ""}
 - Semanas hasta el objetivo: ${weeksToRace}
 - Fecha inicio: ${start.toLocaleDateString("es-ES")}
 - Notas del corredor: ${notes ?? "ninguna"}
+${racesSection}
 
 ÚLTIMAS 10 ACTIVIDADES:
 ${recentActivities.slice(0, 10).map(a => {
@@ -124,7 +139,8 @@ INSTRUCCIONES:
 Genera un plan de ${weeksToRace} semanas con ${daysPerWeek} días de entreno por semana.
 Sigue la regla del 10% (no aumentes más del 10% de km semanales).
 Incluye semanas de descarga cada 3-4 semanas (reduce volumen 20-30%).
-Si hay carrera objetivo, incluye tapering las 2 últimas semanas.
+Si hay carrera objetivo principal, incluye tapering las 2 últimas semanas antes.
+Si hay carreras secundarias en el calendario, ajusta la carga esa semana (reducción ligera) y trátala como rodaje fuerte, no como tapering completo.
 Para cada sesión incluye descripción breve y concreta en español.
 
 Tipos de sesión válidos: EASY, LONG, TEMPO, INTERVALS, RECOVERY, REST

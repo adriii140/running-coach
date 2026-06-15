@@ -305,7 +305,7 @@ function GeneratePlanModal({ onClose, onGenerated }: {
   useEffect(() => {
     fetch("/api/events?upcoming=true")
       .then(r => r.ok ? r.json() : null)
-      .then(data => { if (data?.events) setEvents(data.events.slice(0, 5)); })
+      .then(data => { if (data?.events) setEvents(data.events); })
       .catch(() => {});
   }, []);
 

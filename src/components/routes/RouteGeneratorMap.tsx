@@ -188,7 +188,6 @@ export function RouteGeneratorMap({ lastRunLat, lastRunLng }: RouteGeneratorMapP
   const [zoneVertexCount, setZoneVertexCount] = useState(0);
 
   // Mobile sidebar
-  const [sidebarOpen, setSidebarOpen] = useState(false);
 
   // Search
   const [searchQuery, setSearchQuery] = useState("");
@@ -826,33 +825,11 @@ ${trkpts}
   }, [route, startPoint, saving]);
 
   return (
-    <div className="flex flex-col lg:flex-row gap-4 h-[calc(100vh-10rem)]">
+    <div className="flex flex-col lg:flex-row gap-4 lg:h-[calc(100vh-10rem)]">
 
-      {/* ── MOBILE: overlay backdrop ── */}
-      {sidebarOpen && (
-        <div
-          className="fixed inset-0 z-[900] bg-black/60 lg:hidden"
-          onClick={() => setSidebarOpen(false)}
-        />
-      )}
-
-      {/* ── Panel lateral ── */}
-      {/* Desktop: always visible in flex layout. Mobile: fixed slide-over when sidebarOpen */}
-      <div className={[
-        "w-80 shrink-0 overflow-y-auto space-y-3 pb-2",
-        // Desktop: always shown in normal flow
-        "hidden lg:block",
-        // Mobile: show as fixed overlay when open
-        sidebarOpen ? "!block fixed inset-y-0 left-0 z-[901] bg-background border-r border-border pb-20 shadow-2xl" : "",
-      ].join(" ")}>
-      {/* Mobile close button */}
-      <div className="lg:hidden flex items-center justify-between px-4 py-3 border-b border-border sticky top-0 bg-background z-10">
-        <span className="text-sm font-semibold">Opciones de ruta</span>
-        <button onClick={() => setSidebarOpen(false)} className="p-1 rounded-lg hover:bg-muted">
-          <X className="h-5 w-5" />
-        </button>
-      </div>
-      <div className="space-y-3 p-4 lg:p-0">
+      {/* ── Panel lateral — encima en móvil, izquierda en desktop ── */}
+      <div className="w-full lg:w-80 lg:shrink-0 lg:overflow-y-auto lg:space-y-3 lg:pb-2">
+      <div className="space-y-3">
 
         {/* 1. Punto de salida */}
         <Section title="Punto de salida" icon={<MapPin className="h-4 w-4 text-orange-400" />}>
@@ -1347,7 +1324,7 @@ ${trkpts}
       </div>{/* end sidebar */}
 
       {/* ── Mapa ── */}
-      <div className="flex-1 rounded-xl overflow-hidden border border-border/50 relative min-h-[400px]">
+      <div className="flex-1 rounded-xl overflow-hidden border border-border/50 relative min-h-[60vh] lg:min-h-0">
         <div ref={mapContainerRef} className="w-full h-full" />
 
         {drawingZone && (
@@ -1363,36 +1340,6 @@ ${trkpts}
             <div className="bg-background/80 backdrop-blur-sm rounded-xl px-4 py-3 text-sm text-muted-foreground border border-border/50 text-center">
               <MapPin className="h-5 w-5 mx-auto mb-1 text-orange-400" />
               Busca una ubicación o toca el mapa
-            </div>
-          </div>
-        )}
-
-        {/* Mobile FAB — open sidebar */}
-        <button
-          onClick={() => setSidebarOpen(true)}
-          className="lg:hidden absolute bottom-4 right-4 z-[800] flex items-center gap-2 rounded-full bg-primary px-4 py-3 text-sm font-semibold text-primary-foreground shadow-lg hover:bg-primary/90 active:scale-95 transition-all"
-        >
-          <Sparkles className="h-4 w-4" />
-          {route ? "Ver ruta" : "Opciones"}
-        </button>
-
-        {/* Mobile route stats overlay — bottom bar when route exists */}
-        {route && !sidebarOpen && (
-          <div className="lg:hidden absolute bottom-16 left-3 right-3 z-[800] rounded-xl bg-card/95 backdrop-blur-sm border border-orange-500/30 px-3 py-2 flex items-center justify-between gap-2 shadow-lg">
-            <div className="flex items-center gap-3 text-sm font-bold">
-              <span>{route.distanceKm} km</span>
-              <span className="text-muted-foreground">·</span>
-              <span>{route.durationMin} min</span>
-              <span className="text-muted-foreground">·</span>
-              <span className="text-green-400">{route.elevationM}m↑</span>
-            </div>
-            <div className="flex gap-1.5">
-              <button onClick={downloadGPX} className="rounded-lg bg-blue-500/15 border border-blue-500/30 text-blue-400 p-1.5">
-                <Download className="h-3.5 w-3.5" />
-              </button>
-              <button onClick={openInGoogleMaps} className="rounded-lg bg-muted/40 border border-border p-1.5 text-muted-foreground">
-                <Map className="h-3.5 w-3.5" />
-              </button>
             </div>
           </div>
         )}
