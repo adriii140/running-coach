@@ -7,12 +7,19 @@ export async function GET(req: NextRequest) {
   const session = await getSessionFromRequest(req);
   if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
+  const { searchParams } = new URL(req.url);
+  const upcoming = searchParams.get("upcoming") === "true";
+
   const events = await prisma.sportEvent.findMany({
-    where: { userId: session.userId },
+    where: {
+      userId: session.userId,
+      ...(upcoming ? { date: { gte: new Date() } } : {}),
+    },
     orderBy: { date: "asc" },
+    ...(upcoming ? { take: 10 } : {}),
   });
 
-  return NextResponse.json(events);
+  return NextResponse.json({ events });
 }
 
 export async function POST(req: NextRequest) {

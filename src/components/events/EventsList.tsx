@@ -72,7 +72,7 @@ export function EventsList({ initialEvents }: EventsListProps) {
   const refreshEvents = () => {
     fetch("/api/events")
       .then((r) => r.json())
-      .then((data) => setEvents(data));
+      .then((data) => setEvents(Array.isArray(data) ? data : (data.events ?? [])));
     router.refresh();
   };
 

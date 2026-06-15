@@ -280,6 +280,13 @@ function SessionDetailModal({
 
 // ─── Generate Plan Modal ───────────────────────────────────────────────────────
 
+interface SportEvent {
+  id: string;
+  name: string;
+  date: string;
+  distanceKm: number | null;
+}
+
 function GeneratePlanModal({ onClose, onGenerated }: {
   onClose: () => void;
   onGenerated: (plan: TrainingPlan) => void;
@@ -290,12 +297,31 @@ function GeneratePlanModal({ onClose, onGenerated }: {
   const [notes, setNotes] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
-  const [progress, setProgress] = useState("");
+  const [progress, setProgress] = useState(0);
+  const [sportEventId, setSportEventId] = useState<string | null>(null);
+  const [events, setEvents] = useState<SportEvent[]>([]);
+
+  // Load upcoming events
+  useEffect(() => {
+    fetch("/api/events?upcoming=true")
+      .then(r => r.ok ? r.json() : null)
+      .then(data => { if (data?.events) setEvents(data.events.slice(0, 5)); })
+      .catch(() => {});
+  }, []);
+
+  // Progress animation during generation
+  useEffect(() => {
+    if (!loading) { setProgress(0); return; }
+    setProgress(10);
+    const t1 = setTimeout(() => setProgress(35), 1500);
+    const t2 = setTimeout(() => setProgress(65), 4000);
+    const t3 = setTimeout(() => setProgress(85), 8000);
+    return () => { clearTimeout(t1); clearTimeout(t2); clearTimeout(t3); };
+  }, [loading]);
 
   async function generate() {
     setLoading(true);
     setError("");
-    setProgress("Analizando tus datos de entrenamiento...");
     try {
       const res = await fetch("/api/training-plan/generate", {
         method: "POST",
@@ -304,40 +330,89 @@ function GeneratePlanModal({ onClose, onGenerated }: {
           mode: "ai",
           startDate,
           daysPerWeek,
+          sportEventId: sportEventId ?? undefined,
           currentWeeklyKm: currentWeeklyKm ? Number(currentWeeklyKm) : undefined,
           notes: notes || undefined,
         }),
       });
-      setProgress("El coach está diseñando tu plan...");
       if (!res.ok) {
         const err = await res.json();
         throw new Error(err.error ?? "Error generando el plan");
       }
+      setProgress(100);
       const plan = await res.json();
       onGenerated(plan);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Error desconocido");
     } finally {
       setLoading(false);
-      setProgress("");
     }
   }
 
+  const selectedEvent = events.find(e => e.id === sportEventId);
+  const progressMessages = ["Analizando historial...", "Calculando volumen...", "Diseñando semanas...", "Ajustando tapering...", "Finalizando plan..."];
+  const progressMsgIdx = Math.floor(progress / 20);
+
   return (
     <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/70 sm:items-center p-0 sm:p-4">
-      <div className="w-full max-w-md rounded-t-3xl sm:rounded-2xl border border-border bg-card shadow-2xl">
+      <div className="w-full max-w-md rounded-t-3xl sm:rounded-2xl border border-border bg-card shadow-2xl max-h-[92vh] overflow-y-auto">
         <div className="flex justify-center pt-3 pb-1 sm:hidden">
           <div className="h-1 w-10 rounded-full bg-muted-foreground/30" />
         </div>
         <div className="p-5">
-          <div className="mb-5 flex items-center gap-2">
-            <Sparkles className="h-5 w-5 text-primary" />
-            <h2 className="text-lg font-semibold">Nuevo plan con Coach IA</h2>
+          <div className="mb-5 flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <Sparkles className="h-5 w-5 text-primary" />
+              <h2 className="text-lg font-semibold">Nuevo plan con Coach IA</h2>
+            </div>
+            <button onClick={onClose} className="rounded-lg p-1.5 hover:bg-muted">
+              <X className="h-4 w-4" />
+            </button>
           </div>
 
           <div className="space-y-4">
+            {/* Race event selector */}
+            {events.length > 0 && (
+              <div>
+                <label className="mb-1.5 block text-sm font-medium">
+                  Carrera objetivo <span className="font-normal text-muted-foreground">(opcional)</span>
+                </label>
+                <div className="space-y-2">
+                  <button
+                    onClick={() => setSportEventId(null)}
+                    className={`w-full rounded-xl border px-3 py-2.5 text-left text-sm transition-colors ${
+                      !sportEventId ? "border-primary bg-primary/10 text-primary" : "border-border hover:border-primary/30"
+                    }`}
+                  >
+                    Sin carrera objetivo (plan de base)
+                  </button>
+                  {events.map(ev => {
+                    const weeks = Math.floor((new Date(ev.date).getTime() - new Date().getTime()) / (7 * 24 * 3600 * 1000));
+                    return (
+                      <button
+                        key={ev.id}
+                        onClick={() => setSportEventId(ev.id)}
+                        className={`w-full rounded-xl border px-3 py-2.5 text-left text-sm transition-colors ${
+                          sportEventId === ev.id ? "border-primary bg-primary/10" : "border-border hover:border-primary/30"
+                        }`}
+                      >
+                        <div className="flex items-center justify-between">
+                          <span className="font-medium truncate">{ev.name}</span>
+                          {ev.distanceKm && <span className="text-xs text-muted-foreground shrink-0 ml-2">{ev.distanceKm}km</span>}
+                        </div>
+                        <p className="text-xs text-muted-foreground mt-0.5">
+                          {new Date(ev.date).toLocaleDateString("es-ES", { day: "numeric", month: "short", year: "numeric" })}
+                          {weeks > 0 && ` · ${weeks} semanas`}
+                        </p>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+
             <div>
-              <label className="mb-1.5 block text-sm font-medium">Fecha de inicio</label>
+              <label className="mb-1.5 block text-sm font-medium">Fecha de inicio del plan</label>
               <input
                 type="date"
                 value={startDate}
@@ -383,7 +458,7 @@ function GeneratePlanModal({ onClose, onGenerated }: {
                 Notas para el coach <span className="font-normal text-muted-foreground">(opcional)</span>
               </label>
               <textarea
-                placeholder="Ej: Tengo maratón en 12 semanas, suelo lesionarme la rodilla..."
+                placeholder="Ej: Suelo lesionarme la rodilla, prefiero entrenar por la mañana..."
                 value={notes}
                 onChange={e => setNotes(e.target.value)}
                 rows={3}
@@ -394,12 +469,36 @@ function GeneratePlanModal({ onClose, onGenerated }: {
             {error && (
               <p className="rounded-xl bg-red-500/10 px-3 py-2.5 text-sm text-red-400">{error}</p>
             )}
+
+            {/* Generation summary */}
+            {selectedEvent && (
+              <div className="rounded-xl bg-primary/10 border border-primary/20 px-3 py-2.5 text-xs text-primary">
+                El coach generará un plan para preparar <strong>{selectedEvent.name}</strong>
+                {` con ${daysPerWeek} días/semana`}
+              </div>
+            )}
           </div>
+
+          {/* Progress bar during generation */}
+          {loading && (
+            <div className="mt-4 space-y-2">
+              <div className="h-1.5 rounded-full bg-muted overflow-hidden">
+                <div
+                  className="h-full rounded-full bg-primary transition-all duration-1000"
+                  style={{ width: `${progress}%` }}
+                />
+              </div>
+              <p className="text-xs text-center text-muted-foreground">
+                {progressMessages[Math.min(progressMsgIdx, progressMessages.length - 1)]}
+              </p>
+            </div>
+          )}
 
           <div className="mt-5 flex gap-3">
             <button
               onClick={onClose}
-              className="flex-1 rounded-xl border border-border bg-background py-3 text-sm font-medium hover:bg-muted/50"
+              disabled={loading}
+              className="flex-1 rounded-xl border border-border bg-background py-3 text-sm font-medium hover:bg-muted/50 disabled:opacity-40"
             >
               Cancelar
             </button>
@@ -411,7 +510,7 @@ function GeneratePlanModal({ onClose, onGenerated }: {
               {loading ? (
                 <>
                   <Loader2 className="h-4 w-4 animate-spin" />
-                  <span className="text-xs">{progress || "Generando..."}</span>
+                  Generando...
                 </>
               ) : (
                 <>
