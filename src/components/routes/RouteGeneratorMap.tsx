@@ -1324,7 +1324,7 @@ ${trkpts}
       </div>{/* end sidebar */}
 
       {/* ── Mapa ── */}
-      <div className="flex-1 rounded-xl overflow-hidden border border-border/50 relative min-h-[60vh] lg:min-h-0">
+      <div className="rounded-xl overflow-hidden border border-border/50 relative h-[60vh] lg:flex-1 lg:h-auto">
         <div ref={mapContainerRef} className="w-full h-full" />
 
         {drawingZone && (
