@@ -9,6 +9,7 @@ import {
   Brain,
   Target,
   Calendar,
+  ClipboardList,
   Settings,
   LogOut,
   Dumbbell,
@@ -30,6 +31,7 @@ const navItems = [
   { href: "/routes", label: "Rutas", icon: Map },
   { href: "/goals", label: "Objetivos", icon: Target },
   { href: "/events", label: "Carreras", icon: Calendar },
+  { href: "/training", label: "Plan de entreno", icon: ClipboardList },
   { href: "/strength", label: "Fuerza", icon: Dumbbell },
   { href: "/settings", label: "Configuración", icon: Settings },
 ];

@@ -17,7 +17,11 @@ export async function POST(req: NextRequest) {
   const session = await getSessionFromRequest(req);
   if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
-  const [brain, recentActivities, upcomingEvents, activeGoals] = await Promise.all([
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const tomorrow = new Date(today.getTime() + 24 * 3600 * 1000);
+
+  const [brain, recentActivities, upcomingEvents, activeGoals, plannedToday] = await Promise.all([
     prisma.runningBrain.findUnique({ where: { userId: session.userId } }),
     prisma.activity.findMany({
       where: { userId: session.userId },
@@ -37,6 +41,14 @@ export async function POST(req: NextRequest) {
     prisma.goal.findMany({
       where: { userId: session.userId, status: "ACTIVE" },
       take: 3,
+    }),
+    prisma.plannedSession.findFirst({
+      where: {
+        plan: { userId: session.userId, status: "ACTIVE" },
+        date: { gte: today, lt: tomorrow },
+        completed: false,
+        skipped: false,
+      },
     }),
   ]);
 
@@ -84,7 +96,16 @@ ${activeGoals.length > 0
   ? activeGoals.map(g => `  - ${g.name}`).join("\n")
   : "  - Sin objetivos activos"}
 
-INSTRUCCIÓN: Basándote en estos datos, decide exactamente qué entrenamiento debe hacer hoy.
+${plannedToday ? `SESIÓN PLANIFICADA PARA HOY (del plan de entrenamiento activo):
+- Tipo: ${plannedToday.type}
+- Distancia: ${plannedToday.distanceKm ? plannedToday.distanceKm + " km" : "sin especificar"}
+- Duración: ${plannedToday.durationMin ? plannedToday.durationMin + " min" : "sin especificar"}
+- Zona: ${plannedToday.zone ?? "sin especificar"}
+- Elevación máx: ${plannedToday.elevationM ? plannedToday.elevationM + " m" : "sin especificar"}
+- Descripción: ${plannedToday.description ?? "ninguna"}
+RESPETA este tipo de sesión si es consistente con los datos de carga. Solo desvíate si el TSB indica fatiga extrema.
+
+` : ""}INSTRUCCIÓN: Basándote en estos datos, decide exactamente qué entrenamiento debe hacer hoy.
 Ten en cuenta:
 - TSB > 10: puede hacer sesión de calidad o larga
 - TSB entre -10 y 10: rodaje moderado
