@@ -1,7 +1,8 @@
 "use client";
 
+import { useState } from "react";
 import dynamic from "next/dynamic";
-import { TrendingUp, Activity, Heart } from "lucide-react";
+import { TrendingUp, Activity, Heart, ChevronDown, ChevronUp } from "lucide-react";
 
 const WeeklyKmChart = dynamic(() => import("./WeeklyKmChart").then((m) => m.WeeklyKmChart), { ssr: false });
 const FitnessChart  = dynamic(() => import("./FitnessChart").then((m) => m.FitnessChart),   { ssr: false });
@@ -18,20 +19,33 @@ function StatCard({ label, value, sub, color }: { label: string; value: string; 
   return (
     <div className="rounded-xl border border-border/50 bg-card/40 px-4 py-3">
       <p className="text-xs text-muted-foreground">{label}</p>
-      <p className={`text-2xl font-bold mt-0.5 ${color ?? ""}`}>{value}</p>
+      <p className={`text-xl sm:text-2xl font-bold mt-0.5 tabular-nums ${color ?? ""}`}>{value}</p>
       {sub && <p className="text-xs text-muted-foreground mt-0.5">{sub}</p>}
     </div>
   );
 }
 
-function ChartCard({ title, icon, children }: { title: string; icon: React.ReactNode; children: React.ReactNode }) {
+function ChartCard({ title, icon, children, defaultOpen = true }: {
+  title: string;
+  icon: React.ReactNode;
+  children: React.ReactNode;
+  defaultOpen?: boolean;
+}) {
+  const [open, setOpen] = useState(defaultOpen);
+
   return (
-    <div className="rounded-xl border border-border/50 bg-card/40 p-4 space-y-3">
-      <div className="flex items-center gap-2">
-        <span className="text-muted-foreground">{icon}</span>
-        <h3 className="font-semibold text-sm">{title}</h3>
-      </div>
-      {children}
+    <div className="rounded-xl border border-border/50 bg-card/40 overflow-hidden">
+      <button
+        onClick={() => setOpen(v => !v)}
+        className="w-full flex items-center justify-between gap-2 px-4 py-3 hover:bg-muted/30 transition-colors"
+      >
+        <div className="flex items-center gap-2">
+          <span className="text-muted-foreground">{icon}</span>
+          <h3 className="font-semibold text-sm text-left">{title}</h3>
+        </div>
+        {open ? <ChevronUp className="h-4 w-4 text-muted-foreground shrink-0" /> : <ChevronDown className="h-4 w-4 text-muted-foreground shrink-0" />}
+      </button>
+      {open && <div className="px-4 pb-4">{children}</div>}
     </div>
   );
 }
@@ -52,7 +66,7 @@ export function ProgressCharts({ weeklyData, fitnessHistory, pacePoints, current
     currentBrain.tsb > -30 ? "Cargado" : "Sobreentrenado";
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-5">
       <div>
         <h1 className="text-2xl font-bold">Progreso</h1>
         <p className="text-sm text-muted-foreground mt-1">Últimas 16 semanas</p>
@@ -64,34 +78,44 @@ export function ProgressCharts({ weeklyData, fitnessHistory, pacePoints, current
         <StatCard label="Media semanal"  value={`${avgKm.toFixed(1)} km`} />
         <StatCard label="Mejor semana"   value={`${maxWeek.km.toFixed(1)} km`} sub={maxWeek.week} />
         <StatCard
-          label="Forma actual (TSB)"
+          label="Forma (TSB)"
           value={currentBrain ? (currentBrain.tsb > 0 ? `+${currentBrain.tsb.toFixed(1)}` : `${currentBrain.tsb.toFixed(1)}`) : "–"}
           sub={tsbLabel}
           color={tsbColor}
         />
       </div>
 
-      {/* Gráficas */}
-      <div className="space-y-4">
-        <ChartCard title="Kilómetros semanales" icon={<Activity className="h-4 w-4" />}>
+      {/* Charts — collapsible on mobile */}
+      <div className="space-y-3">
+        <ChartCard title="Kilómetros por semana" icon={<Activity className="h-4 w-4" />} defaultOpen={true}>
           {weeklyData.length > 0
             ? <WeeklyKmChart data={weeklyData} />
             : <p className="text-sm text-muted-foreground py-8 text-center">Sin datos</p>
           }
         </ChartCard>
 
-        <ChartCard title="Fitness · Fatiga · Forma (CTL / ATL / TSB)" icon={<Heart className="h-4 w-4" />}>
+        <ChartCard title="Fitness · Fatiga · Forma (CTL / ATL / TSB)" icon={<Heart className="h-4 w-4" />} defaultOpen={false}>
           {fitnessHistory.length > 0
             ? <FitnessChart data={fitnessHistory} />
             : <p className="text-sm text-muted-foreground py-8 text-center">Sin datos</p>
           }
         </ChartCard>
 
-        <ChartCard title="Ritmo por carrera (tamaño = distancia)" icon={<TrendingUp className="h-4 w-4" />}>
-          {pacePoints.length > 0
-            ? <PaceChart data={pacePoints} />
-            : <p className="text-sm text-muted-foreground py-8 text-center">Sin carreras con GPS en este periodo</p>
-          }
+        <ChartCard
+          title="Ritmo por carrera"
+          icon={<TrendingUp className="h-4 w-4" />}
+          defaultOpen={false}
+        >
+          {pacePoints.length > 0 ? (
+            <div>
+              <p className="text-xs text-muted-foreground mb-3">
+                Cada burbuja es una carrera — el tamaño indica la distancia (km)
+              </p>
+              <PaceChart data={pacePoints} />
+            </div>
+          ) : (
+            <p className="text-sm text-muted-foreground py-8 text-center">Sin carreras con GPS en este periodo</p>
+          )}
         </ChartCard>
       </div>
     </div>

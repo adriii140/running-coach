@@ -49,10 +49,15 @@ export default async function DashboardPage() {
 
   const todayStart = new Date(); todayStart.setHours(0,0,0,0);
   const todayEnd = new Date(); todayEnd.setHours(23,59,59,999);
+  const lastWeekStart = new Date(weekStart.getTime() - 7 * 24 * 3600 * 1000);
 
-  const [weeklyActivities, recentActivities, brain, todayPlanned] = await Promise.all([
+  const [weeklyActivities, lastWeekActivities, recentActivities, brain, todayPlanned] = await Promise.all([
     prisma.activity.findMany({
       where: { userId, startDate: { gte: weekStart } },
+      select: { distance: true, movingTime: true, totalElevation: true, activityType: true },
+    }),
+    prisma.activity.findMany({
+      where: { userId, startDate: { gte: lastWeekStart, lt: weekStart } },
       select: { distance: true, movingTime: true, totalElevation: true, activityType: true },
     }),
     prisma.activity.findMany({
@@ -75,6 +80,11 @@ export default async function DashboardPage() {
     }),
   ]);
 
+  // Check if there's an active plan (even if no session today)
+  const hasActivePlan = todayPlanned !== null || await prisma.trainingPlan.count({
+    where: { userId, status: "ACTIVE" },
+  }).then(c => c > 0);
+
   const hour = new Date().getHours();
   const greeting = hour < 12 ? "Buenos días" : hour < 20 ? "Buenas tardes" : "Buenas noches";
 
@@ -93,6 +103,13 @@ export default async function DashboardPage() {
         </div>
         <SyncButton />
       </div>
+
+      {!todayPlanned && hasActivePlan && (
+        <div className="rounded-2xl border border-border/50 bg-muted/20 px-4 py-3 flex items-center gap-3 text-sm text-muted-foreground">
+          <span className="text-xl">😴</span>
+          <span>Hoy es día de descanso según tu plan de entrenamiento. ¡Recupera bien!</span>
+        </div>
+      )}
 
       {todayPlanned && (
         <TodaySession
@@ -115,7 +132,7 @@ export default async function DashboardPage() {
         <h2 className="text-sm font-medium text-muted-foreground mb-3 uppercase tracking-wide">
           Esta semana
         </h2>
-        <WeeklySummary activities={weeklyActivities} />
+        <WeeklySummary activities={weeklyActivities} lastWeekActivities={lastWeekActivities} />
       </section>
 
       <section>

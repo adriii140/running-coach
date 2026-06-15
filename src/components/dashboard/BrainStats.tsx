@@ -72,6 +72,25 @@ function TrainingLoadCard({ brain, tsb, tsbText, tsbColor }: {
               </p>
             </div>
           </div>
+          {/* Race window indicator */}
+          {brain.tsb !== null && brain.tsb > 5 && (
+            <div className="rounded-xl bg-emerald-500/10 border border-emerald-500/30 px-3 py-2 flex items-center gap-2">
+              <span className="text-lg">🎯</span>
+              <div>
+                <p className="text-xs font-semibold text-emerald-400">Ventana óptima</p>
+                <p className="text-[10px] text-muted-foreground">Estás fresco — buen momento para rendir al máximo</p>
+              </div>
+            </div>
+          )}
+          {brain.tsb !== null && brain.tsb < -25 && (
+            <div className="rounded-xl bg-red-500/10 border border-red-500/30 px-3 py-2 flex items-center gap-2">
+              <span className="text-lg">⚠️</span>
+              <div>
+                <p className="text-xs font-semibold text-red-400">Fatiga elevada</p>
+                <p className="text-[10px] text-muted-foreground">Prioriza recuperación antes de sesiones duras</p>
+              </div>
+            </div>
+          )}
           <div className="space-y-2 pt-1">
             <div className="flex justify-between text-sm">
               <span className="text-muted-foreground">Esta semana</span>

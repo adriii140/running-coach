@@ -66,6 +66,7 @@ export function EventsList({ initialEvents }: EventsListProps) {
   const [showForm, setShowForm] = useState(false);
   const [editingEvent, setEditingEvent] = useState<SportEvent | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [showAllPast, setShowAllPast] = useState(false);
   const router = useRouter();
 
   const refreshEvents = () => {
@@ -164,7 +165,7 @@ export function EventsList({ initialEvents }: EventsListProps) {
           <section className="space-y-3">
             <h2 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Completados</h2>
             <div className="space-y-2 opacity-60">
-              {past.slice(0, 5).map((event) => (
+              {past.slice(0, showAllPast ? past.length : 5).map((event) => (
                 <EventCard
                   key={event.id}
                   event={event}
@@ -174,7 +175,15 @@ export function EventsList({ initialEvents }: EventsListProps) {
                   deleting={deletingId === event.id}
                 />
               ))}
-            </div>
+              {past.length > 5 && (
+              <button
+                onClick={() => setShowAllPast(v => !v)}
+                className="w-full py-2 text-xs text-muted-foreground hover:text-foreground transition-colors"
+              >
+                {showAllPast ? "Mostrar menos" : `Ver ${past.length - 5} más`}
+              </button>
+            )}
+          </div>
           </section>
         )}
 
@@ -267,7 +276,7 @@ function EventCard({
       {/* Right side */}
       <div className="shrink-0 flex flex-col items-end gap-2">
         <DaysChip days={days} />
-        <div className="flex items-center gap-2 lg:opacity-0 lg:group-hover:opacity-100 transition-opacity">
+        <div className="flex items-center gap-2">
           <button
             onClick={() => onToggleRegistered(event)}
             title={event.registered ? "Inscrito" : "Marcar como inscrito"}
