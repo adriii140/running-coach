@@ -247,6 +247,7 @@ export async function fullSync(userId: string): Promise<SyncResult> {
   await syncBestEfforts(userId, accessToken);         // PRs reales desde Strava
   await recalculateBrain(userId);                     // zonas usando best5kSec actualizado
   await deriveZonesFromStravaHR(userId, accessToken); // override con FC si hay datos
+  if (synced > 0) await autoLinkActivitiesToPlan(userId);
 
   return {
     synced,
@@ -305,6 +306,7 @@ export async function incrementalSync(userId: string): Promise<SyncResult> {
   await syncBestEfforts(userId, accessToken, 5);
   await recalculateBrain(userId);
   await deriveZonesFromStravaHR(userId, accessToken);
+  if (synced > 0) await autoLinkActivitiesToPlan(userId);
 
   return {
     synced,
@@ -314,6 +316,50 @@ export async function incrementalSync(userId: string): Promise<SyncResult> {
       ? `${synced} nuevas actividades sincronizadas.`
       : "Todo al día. PRs y zonas actualizados.",
   };
+}
+
+// Auto-link activities to planned sessions by date match
+async function autoLinkActivitiesToPlan(userId: string): Promise<void> {
+  try {
+    // Find pending sessions in active plans
+    const pendingSessions = await prisma.plannedSession.findMany({
+      where: {
+        completed: false,
+        skipped: false,
+        plan: { userId, status: "ACTIVE" },
+        type: { not: "REST" },
+      },
+      select: { id: true, date: true, type: true },
+    });
+
+    if (pendingSessions.length === 0) return;
+
+    // For each pending session, check if there's a matching activity on the same day
+    for (const ps of pendingSessions) {
+      const dayStart = new Date(ps.date);
+      dayStart.setHours(0, 0, 0, 0);
+      const dayEnd = new Date(ps.date);
+      dayEnd.setHours(23, 59, 59, 999);
+
+      const activity = await prisma.activity.findFirst({
+        where: {
+          userId,
+          startDate: { gte: dayStart, lte: dayEnd },
+          activityType: { in: [ActivityType.RUN, ActivityType.TRAIL_RUN, ActivityType.VIRTUAL_RUN, ActivityType.STRENGTH, ActivityType.CYCLING] },
+        },
+        select: { id: true },
+      });
+
+      if (activity) {
+        await prisma.plannedSession.update({
+          where: { id: ps.id },
+          data: { completed: true, activityId: activity.id },
+        });
+      }
+    }
+  } catch {
+    // Non-critical — don't fail sync if auto-link fails
+  }
 }
 
 // Sincronización de una sola actividad (trigger de webhook)
