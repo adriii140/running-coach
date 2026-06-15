@@ -51,7 +51,7 @@ export default async function DashboardPage() {
   const todayEnd = new Date(); todayEnd.setHours(23,59,59,999);
   const lastWeekStart = new Date(weekStart.getTime() - 7 * 24 * 3600 * 1000);
 
-  const [weeklyActivities, lastWeekActivities, recentActivities, brain, todayPlanned] = await Promise.all([
+  const [weeklyActivities, lastWeekActivities, recentActivities, brain] = await Promise.all([
     prisma.activity.findMany({
       where: { userId, startDate: { gte: weekStart } },
       select: { distance: true, movingTime: true, totalElevation: true, activityType: true },
@@ -71,19 +71,20 @@ export default async function DashboardPage() {
       },
     }),
     prisma.runningBrain.findUnique({ where: { userId } }),
-    prisma.plannedSession.findFirst({
-      where: {
-        plan: { userId, status: "ACTIVE" },
-        date: { gte: todayStart, lte: todayEnd },
-      },
-      include: { plan: { select: { name: true } } },
-    }),
   ]);
 
-  // Check if there's an active plan (even if no session today)
+  // Training plan queries — graceful fallback if tables don't exist yet
+  const todayPlanned = await prisma.plannedSession.findFirst({
+    where: {
+      plan: { userId, status: "ACTIVE" },
+      date: { gte: todayStart, lte: todayEnd },
+    },
+    include: { plan: { select: { name: true } } },
+  }).catch(() => null);
+
   const hasActivePlan = todayPlanned !== null || await prisma.trainingPlan.count({
     where: { userId, status: "ACTIVE" },
-  }).then(c => c > 0);
+  }).then(c => c > 0).catch(() => false);
 
   const hour = new Date().getHours();
   const greeting = hour < 12 ? "Buenos días" : hour < 20 ? "Buenas tardes" : "Buenas noches";

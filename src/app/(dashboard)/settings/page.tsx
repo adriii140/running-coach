@@ -9,6 +9,16 @@ function isConfigured(value: string | undefined): boolean {
   return !!value && value.length > 0 && !value.includes("placeholder");
 }
 
+const DEFAULT_SETTINGS = {
+  unitSystem: "metric",
+  timezone: "Europe/Madrid",
+  weekStartsOn: 1,
+  homeLocationName: null,
+  homeLocationLat: null,
+  homeLocationLng: null,
+  autoSync: true,
+};
+
 export default async function SettingsPage() {
   const session = await getSession();
   if (!session) redirect("/login");
@@ -22,7 +32,7 @@ export default async function SettingsPage() {
       where: { userId: session.userId },
       create: { userId: session.userId },
       update: {},
-    }),
+    }).catch(() => null),
   ]);
 
   const user = {
@@ -32,14 +42,15 @@ export default async function SettingsPage() {
     stravaConnected: !!dbUser?.stravaAccessToken,
   };
 
+  const s = settings ?? DEFAULT_SETTINGS;
   const settingsProps = {
-    unitSystem: settings.unitSystem,
-    timezone: settings.timezone,
-    weekStartsOn: settings.weekStartsOn,
-    homeLocationName: settings.homeLocationName,
-    homeLocationLat: settings.homeLocationLat,
-    homeLocationLng: settings.homeLocationLng,
-    autoSync: settings.autoSync,
+    unitSystem: s.unitSystem,
+    timezone: s.timezone,
+    weekStartsOn: s.weekStartsOn,
+    homeLocationName: s.homeLocationName,
+    homeLocationLat: s.homeLocationLat,
+    homeLocationLng: s.homeLocationLng,
+    autoSync: s.autoSync,
   };
 
   const envStatus = {
