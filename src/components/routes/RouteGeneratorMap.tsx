@@ -837,10 +837,14 @@ ${trkpts}
       )}
 
       {/* ── Panel lateral ── */}
-      <div className={`
-        fixed inset-y-0 left-0 z-[901] w-80 bg-background border-r border-border overflow-y-auto pb-20 transition-transform duration-300 lg:static lg:z-auto lg:border-0 lg:bg-transparent lg:translate-x-0 lg:w-80 lg:shrink-0 lg:space-y-3 lg:pb-2 lg:overflow-y-auto
-        ${sidebarOpen ? "translate-x-0 shadow-2xl" : "-translate-x-full lg:translate-x-0"}
-      `}>
+      {/* Desktop: always visible in flex layout. Mobile: fixed slide-over when sidebarOpen */}
+      <div className={[
+        "w-80 shrink-0 overflow-y-auto space-y-3 pb-2",
+        // Desktop: always shown in normal flow
+        "hidden lg:block",
+        // Mobile: show as fixed overlay when open
+        sidebarOpen ? "!block fixed inset-y-0 left-0 z-[901] bg-background border-r border-border pb-20 shadow-2xl" : "",
+      ].join(" ")}>
       {/* Mobile close button */}
       <div className="lg:hidden flex items-center justify-between px-4 py-3 border-b border-border sticky top-0 bg-background z-10">
         <span className="text-sm font-semibold">Opciones de ruta</span>
