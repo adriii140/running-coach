@@ -58,7 +58,7 @@ export async function POST(req: NextRequest) {
           create: manualSessions.map((s: GeneratedSession) => ({
             weekNumber: s.weekNumber,
             date: new Date(start.getTime() + s.dayOffset * 24 * 3600 * 1000),
-            type: s.type as never,
+            type: s.type as import("@prisma/client").SessionType,
             distanceKm: s.distanceKm,
             durationMin: s.durationMin,
             targetPaceSec: s.targetPaceSec,
@@ -203,7 +203,15 @@ Los días REST no hace falta incluirlos.`;
     const jsonMatch = text.match(/\{[\s\S]*\}/);
     if (!jsonMatch) throw new Error("El modelo no devolvió JSON válido");
 
-    const generated: GeneratedPlan = JSON.parse(jsonMatch[0]);
+    let generated: GeneratedPlan;
+    try {
+      generated = JSON.parse(jsonMatch[0]);
+    } catch {
+      throw new Error("El modelo devolvió JSON malformado");
+    }
+    if (!Array.isArray(generated?.sessions) || generated.sessions.length === 0) {
+      throw new Error("El plan generado no contiene sesiones válidas");
+    }
 
     // Guardar en BD
     const plan = await prisma.trainingPlan.create({
@@ -221,7 +229,7 @@ Los días REST no hace falta incluirlos.`;
           create: generated.sessions.map((s) => ({
             weekNumber: s.weekNumber,
             date: new Date(start.getTime() + s.dayOffset * 24 * 3600 * 1000),
-            type: s.type as never,
+            type: s.type as import("@prisma/client").SessionType,
             distanceKm: s.distanceKm,
             durationMin: s.durationMin,
             targetPaceSec: s.targetPaceSec,
